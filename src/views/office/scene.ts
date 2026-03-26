@@ -347,7 +347,9 @@ export class OfficeScene {
       cancelAnimationFrame(this.animFrame)
     }
     if (this.app) {
-      this.app.destroy(true)
+      // Pass false so PixiJS doesn't try to remove the canvas from DOM —
+      // React owns the canvas element and will clean it up via the ref.
+      this.app.destroy(false)
       this.app = null
     }
     this.agentSprites.clear()
