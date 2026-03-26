@@ -347,9 +347,16 @@ export class OfficeScene {
       cancelAnimationFrame(this.animFrame)
     }
     if (this.app) {
-      // Pass false so PixiJS doesn't try to remove the canvas from DOM —
-      // React owns the canvas element and will clean it up via the ref.
-      this.app.destroy(false)
+      // PixiJS 8 ResizePlugin.destroy() calls this._cancelResize() which is
+      // only assigned when `resizeTo` is set during init. Since we don't use
+      // `resizeTo`, the function is undefined and destroy() throws. Patch it
+      // before calling destroy.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const appAny = this.app as any
+      if (typeof appAny._cancelResize !== "function") {
+        appAny._cancelResize = () => {}
+      }
+      this.app.destroy()
       this.app = null
     }
     this.agentSprites.clear()
