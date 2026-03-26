@@ -75,7 +75,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header />
+      <Header onOpenSettings={() => setShowConnection(true)} />
       <TabBar onNewTab={() => setShowViewPicker(true)} />
       <main className="flex-1 overflow-hidden">
         {connected ? (

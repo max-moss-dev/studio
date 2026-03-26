@@ -1,10 +1,15 @@
 "use client"
 
-import { Hexagon, Wifi, WifiOff } from "lucide-react"
+import { Hexagon, Wifi, WifiOff, Settings } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { useGatewayStore } from "@/stores/gateway-store"
 
-export function Header() {
+interface HeaderProps {
+  onOpenSettings: () => void
+}
+
+export function Header({ onOpenSettings }: HeaderProps) {
   const connected = useGatewayStore((s) => s.connected)
   const mockMode = useGatewayStore((s) => s.mockMode)
   const agents = useGatewayStore((s) => s.agents)
@@ -30,7 +35,8 @@ export function Header() {
 
         <Badge
           variant={connected ? "default" : "secondary"}
-          className="gap-1.5 text-xs"
+          className="gap-1.5 text-xs cursor-pointer hover:opacity-80"
+          onClick={onOpenSettings}
         >
           {connected ? (
             <Wifi className="h-3 w-3" />
@@ -43,6 +49,15 @@ export function Header() {
               : "Connected"
             : "Disconnected"}
         </Badge>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onOpenSettings}
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
       </div>
     </header>
   )
