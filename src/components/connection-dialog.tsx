@@ -107,7 +107,8 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
                 onKeyDown={(e) => e.key === "Enter" && handleConnect()}
               />
               <p className="text-xs text-muted-foreground">
-                WebSocket URL of your running OpenClaw Gateway instance.
+                WebSocket URL of your OpenClaw Gateway, e.g.{" "}
+                <code className="text-[11px]">ws://194.31.52.158:49616</code>
               </p>
             </div>
 
@@ -124,8 +125,8 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
                 onKeyDown={(e) => e.key === "Enter" && handleConnect()}
               />
               <p className="text-xs text-muted-foreground">
-                Authenticates this Hub client with your Gateway. Find it in your
-                Gateway config.
+                The <code className="text-[11px]">OPENCLAW_GATEWAY_TOKEN</code>{" "}
+                value from your Gateway server. Leave empty if no token is set.
               </p>
             </div>
 

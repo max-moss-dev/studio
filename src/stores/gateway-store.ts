@@ -11,6 +11,7 @@ import type {
 } from "@/lib/types"
 import { WsClient } from "@/lib/ws-client"
 import { MockGateway } from "@/lib/mock-gateway"
+import { uid } from "@/lib/mock-data"
 
 const MAX_EVENTS = 1000
 
@@ -27,11 +28,16 @@ interface GatewayState {
   tasks: Task[]
   messages: Record<string, Message[]>
 
+  // Raw gateway data (for debugging / future views)
+  sessions: unknown[]
+  presence: Record<string, unknown>
+
   // Actions
   connectGateway: (url: string, apiKey: string) => void
   connectMock: () => void
   disconnect: () => void
   send: (msg: GatewayMessage) => void
+  sendToGateway: (method: string, params?: Record<string, unknown>) => Promise<unknown>
   addMessage: (agentId: string, message: Message) => void
 }
 
@@ -63,8 +69,62 @@ export function loadPersistedConfig(): {
   return null
 }
 
+/**
+ * Map an OpenClaw session to our Agent model.
+ * OpenClaw sessions are the closest analogue to "agents" in our Hub.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sessionToAgent(session: any): Agent {
+  return {
+    id: session.id ?? session.sessionKey ?? uid(),
+    name: session.name ?? session.label ?? session.id ?? "Agent",
+    status: mapSessionStatus(session.status ?? session.state),
+    role: mapSessionRole(session),
+    model: session.model ?? session.agent?.model ?? "unknown",
+    currentTask: session.currentTask ?? session.lastMessage?.content?.slice(0, 80) ?? null,
+    tokensToday: session.metrics?.tokensToday ?? session.usage?.tokens ?? 0,
+    tokensTotal: session.metrics?.tokensTotal ?? session.usage?.totalTokens ?? 0,
+    uptime: session.uptime ?? 0,
+    config: session.config ?? session.agent ?? {},
+  }
+}
+
+function mapSessionStatus(status: string | undefined): Agent["status"] {
+  switch (status) {
+    case "active":
+    case "running":
+    case "idle":
+      return "online"
+    case "busy":
+    case "working":
+    case "thinking":
+      return "busy"
+    case "error":
+    case "failed":
+      return "error"
+    case "stopped":
+    case "offline":
+    case "closed":
+    default:
+      return "offline"
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSessionRole(session: any): Agent["role"] {
+  const role = session.role ?? session.agent?.role ?? session.type ?? ""
+  if (role.includes("orchestrat")) return "orchestrator"
+  if (role.includes("code") || role.includes("dev")) return "coder"
+  if (role.includes("review")) return "reviewer"
+  if (role.includes("research")) return "researcher"
+  return "custom"
+}
+
 export const useGatewayStore = create<GatewayState>((set, get) => {
-  function handleEvent(event: GatewayEvent) {
+  /**
+   * Handle events from the mock gateway (our custom protocol).
+   */
+  function handleMockEvent(event: GatewayEvent) {
     switch (event.type) {
       case "agents.snapshot":
         set({ agents: event.agents })
@@ -131,7 +191,6 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
               },
             }
           }
-          // New streaming message
           const newMsg: Message = {
             id: event.messageId,
             agentId: event.agentId,
@@ -151,12 +210,250 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
       case "pong":
       case "message.stream.end":
-        // No-op
         break
 
       case "error":
         console.error(`[Gateway Error] ${event.code}: ${event.message}`)
         break
+    }
+  }
+
+  /**
+   * Handle a raw frame from the real OpenClaw Gateway WebSocket.
+   * Frames follow the OpenClaw protocol: {type:"event", event:"...", payload:{}}
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleGatewayFrame(frame: any) {
+    if (!frame || typeof frame !== "object") return
+
+    // Internal signals from WsClient
+    if (frame.type === "_connected") {
+      set({ connected: true })
+      // Fetch initial data after handshake
+      fetchInitialData()
+      return
+    }
+    if (frame.type === "_disconnected") {
+      set({ connected: false })
+      return
+    }
+
+    // Real OpenClaw events
+    if (frame.type === "event") {
+      handleOpenClawEvent(frame.event, frame.payload, frame.seq)
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleOpenClawEvent(eventName: string, payload: any, seq?: number) {
+    // Map OpenClaw events to our store
+    switch (eventName) {
+      // Session/presence events
+      case "system-presence":
+      case "presence": {
+        set({ presence: payload ?? {} })
+
+        // Update agent statuses from presence data
+        if (payload && typeof payload === "object") {
+          set((s) => {
+            const updatedAgents = s.agents.map((agent) => {
+              const presenceEntry = Object.values(payload).find(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (p: any) => p.sessionKey === agent.id || p.deviceId === agent.id
+              )
+              if (presenceEntry) {
+                return { ...agent, status: "online" as const }
+              }
+              return agent
+            })
+            return { agents: updatedAgents }
+          })
+        }
+        break
+      }
+
+      case "session.created":
+      case "session.updated": {
+        if (payload) {
+          const agent = sessionToAgent(payload)
+          set((s) => ({
+            agents: s.agents.some((a) => a.id === agent.id)
+              ? s.agents.map((a) => (a.id === agent.id ? agent : a))
+              : [...s.agents, agent],
+          }))
+        }
+        break
+      }
+
+      case "session.deleted":
+      case "session.closed": {
+        const sessionId = payload?.id ?? payload?.sessionKey
+        if (sessionId) {
+          set((s) => ({
+            agents: s.agents.filter((a) => a.id !== sessionId),
+          }))
+        }
+        break
+      }
+
+      // Chat / message events
+      case "message.received":
+      case "chat.message": {
+        if (payload) {
+          const agentId = payload.sessionKey ?? payload.agentId ?? payload.from
+          const msg: Message = {
+            id: payload.id ?? uid(),
+            agentId: agentId ?? "unknown",
+            role: payload.role === "user" ? "user" : "assistant",
+            content: payload.content ?? payload.text ?? "",
+            timestamp: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
+          }
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [msg.agentId]: [...(s.messages[msg.agentId] ?? []), msg],
+            },
+          }))
+        }
+        break
+      }
+
+      // Streaming tokens
+      case "message.chunk":
+      case "chat.chunk": {
+        if (payload) {
+          const agentId = payload.sessionKey ?? payload.agentId
+          const messageId = payload.messageId ?? payload.id
+          const delta = payload.content ?? payload.chunk ?? payload.delta ?? ""
+          if (agentId && messageId) {
+            set((s) => {
+              const agentMsgs = s.messages[agentId] ?? []
+              const existing = agentMsgs.find((m) => m.id === messageId)
+              if (existing) {
+                return {
+                  messages: {
+                    ...s.messages,
+                    [agentId]: agentMsgs.map((m) =>
+                      m.id === messageId
+                        ? { ...m, content: m.content + delta }
+                        : m
+                    ),
+                  },
+                }
+              }
+              return {
+                messages: {
+                  ...s.messages,
+                  [agentId]: [
+                    ...agentMsgs,
+                    {
+                      id: messageId,
+                      agentId,
+                      role: "assistant" as const,
+                      content: delta,
+                      timestamp: Date.now(),
+                    },
+                  ],
+                },
+              }
+            })
+          }
+        }
+        break
+      }
+
+      // Task events
+      case "task.created":
+      case "task.updated": {
+        if (payload) {
+          const task: Task = {
+            id: payload.id ?? uid(),
+            title: payload.title ?? payload.description ?? "",
+            status: payload.status ?? "queue",
+            assigneeId: payload.assigneeId ?? payload.sessionKey ?? null,
+            tokens: payload.tokens ?? 0,
+            duration: payload.duration ?? 0,
+            createdAt: payload.createdAt ? new Date(payload.createdAt).getTime() : Date.now(),
+            updatedAt: payload.updatedAt ? new Date(payload.updatedAt).getTime() : Date.now(),
+          }
+          set((s) => ({
+            tasks: s.tasks.some((t) => t.id === task.id)
+              ? s.tasks.map((t) => (t.id === task.id ? task : t))
+              : [...s.tasks, task],
+          }))
+        }
+        break
+      }
+
+      // Agent status changes
+      case "agent.status_changed": {
+        if (payload) {
+          const agentId = payload.sessionKey ?? payload.agentId
+          const newStatus = mapSessionStatus(payload.status)
+          set((s) => ({
+            agents: s.agents.map((a) =>
+              a.id === agentId ? { ...a, status: newStatus } : a
+            ),
+          }))
+        }
+        break
+      }
+
+      // Exec approval events (show as events in the feed)
+      case "exec.approval.requested": {
+        const evt: AgentEvent = {
+          id: uid(),
+          agentId: payload?.sessionKey ?? "system",
+          type: "tool_call",
+          data: { approval: true, command: payload?.command, ...payload },
+          timestamp: Date.now(),
+        }
+        set((s) => ({
+          events: [...s.events, evt].slice(-MAX_EVENTS),
+        }))
+        break
+      }
+
+      default: {
+        // Log unknown events for debugging, store as generic events
+        console.log(`[OpenClaw Event] ${eventName}`, payload)
+        const evt: AgentEvent = {
+          id: uid(),
+          agentId: payload?.sessionKey ?? payload?.agentId ?? "system",
+          type: "status_change",
+          data: { event: eventName, ...payload },
+          timestamp: Date.now(),
+        }
+        set((s) => ({
+          events: [...s.events, evt].slice(-MAX_EVENTS),
+        }))
+      }
+    }
+  }
+
+  /**
+   * After handshake, fetch sessions list and presence to populate the UI.
+   */
+  async function fetchInitialData() {
+    if (!wsClient) return
+
+    try {
+      // Fetch sessions list
+      const sessionsRes = await wsClient.request("sessions.list", {})
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sessions = (sessionsRes as any)?.sessions ?? (sessionsRes as any)?.items ?? []
+      const agents = sessions.map(sessionToAgent)
+      set({ agents, sessions })
+
+      // Fetch presence
+      try {
+        const presenceRes = await wsClient.request("system.presence", {})
+        set({ presence: (presenceRes ?? {}) as Record<string, unknown> })
+      } catch {
+        // presence might not be available
+      }
+    } catch (err) {
+      console.error("[Gateway] Failed to fetch initial data:", err)
     }
   }
 
@@ -169,34 +466,15 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     events: [],
     tasks: [],
     messages: {},
+    sessions: [],
+    presence: {},
 
     connectGateway(url: string, apiKey: string) {
       // Clean up existing connections
       get().disconnect()
 
       wsClient = new WsClient()
-      wsClient.onMessage((data) => {
-        if (
-          data &&
-          typeof data === "object" &&
-          "type" in (data as Record<string, unknown>)
-        ) {
-          const typed = data as GatewayEvent | { type: string }
-          if (typed.type === "_connected") {
-            set({ connected: true })
-            wsClient?.send({
-              type: "subscribe",
-              channels: ["agents", "events", "tasks", "messages"],
-            })
-            return
-          }
-          if (typed.type === "_disconnected") {
-            set({ connected: false })
-            return
-          }
-          handleEvent(typed as GatewayEvent)
-        }
-      })
+      wsClient.onMessage(handleGatewayFrame)
 
       set({ url, apiKey, mockMode: false })
       persistConfig(url, apiKey, false)
@@ -207,7 +485,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       get().disconnect()
 
       mockGateway = new MockGateway()
-      mockGateway.onMessage(handleEvent)
+      mockGateway.onMessage(handleMockEvent)
 
       const initialMessages = mockGateway.getMessages()
       set({
@@ -236,15 +514,85 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         events: [],
         tasks: [],
         messages: {},
+        sessions: [],
+        presence: {},
       })
     },
 
+    /**
+     * Send a message using the appropriate protocol.
+     * Mock mode uses our custom protocol; live mode translates to OpenClaw RPC.
+     */
     send(msg: GatewayMessage) {
       if (get().mockMode && mockGateway) {
         mockGateway.send(msg)
-      } else if (wsClient) {
-        wsClient.send(msg)
+        return
       }
+
+      if (!wsClient) return
+
+      // Translate our GatewayMessage types to OpenClaw RPC calls
+      switch (msg.type) {
+        case "agent.message":
+          wsClient.request("chat.send", {
+            sessionKey: msg.agentId,
+            content: msg.content,
+          }).catch((e) => console.error("[Gateway] chat.send failed:", e))
+          break
+
+        case "agent.command":
+          wsClient.request("sessions.send", {
+            sessionKey: msg.agentId,
+            command: msg.command,
+          }).catch((e) => console.error("[Gateway] sessions.send failed:", e))
+          break
+
+        case "agent.create":
+          wsClient.request("sessions.create", {
+            ...msg.config,
+          }).catch((e) => console.error("[Gateway] sessions.create failed:", e))
+          break
+
+        case "agent.delete":
+          wsClient.request("sessions.delete", {
+            sessionKey: msg.agentId,
+          }).catch((e) => console.error("[Gateway] sessions.delete failed:", e))
+          break
+
+        case "task.create":
+          wsClient.request("tasks.create", {
+            title: msg.title,
+            assigneeId: msg.assigneeId,
+          }).catch((e) => console.error("[Gateway] tasks.create failed:", e))
+          break
+
+        case "task.update":
+          wsClient.request("tasks.update", {
+            taskId: msg.taskId,
+            ...msg.updates,
+          }).catch((e) => console.error("[Gateway] tasks.update failed:", e))
+          break
+
+        case "view.generate":
+          wsClient.request("chat.send", {
+            content: msg.prompt,
+            metadata: { type: "view-generate", requestId: msg.requestId },
+          }).catch((e) => console.error("[Gateway] view.generate failed:", e))
+          break
+
+        default:
+          // Pass through as generic request
+          wsClient.request(msg.type, msg as Record<string, unknown>)
+            .catch((e) => console.error(`[Gateway] ${msg.type} failed:`, e))
+      }
+    },
+
+    /**
+     * Direct RPC call to the Gateway (for advanced use).
+     */
+    async sendToGateway(method: string, params: Record<string, unknown> = {}) {
+      if (!wsClient) throw new Error("Not connected")
+      return wsClient.request(method, params)
     },
 
     addMessage(agentId: string, message: Message) {
