@@ -57,6 +57,7 @@ export class OfficeScene {
   private lastPointer = { x: 0, y: 0 }
   private animFrame: number | null = null
   private initialized = false
+  private destroyed = false
 
   async init(canvas: HTMLCanvasElement, width: number, height: number) {
     if (this.initialized) return
@@ -71,6 +72,12 @@ export class OfficeScene {
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     })
+
+    // If destroy() was called while we were awaiting init, bail out
+    if (this.destroyed) {
+      this.safeDestroyApp()
+      return
+    }
 
     this.app.stage.addChild(this.world)
     this.world.addChild(this.floorContainer)
@@ -342,23 +349,29 @@ export class OfficeScene {
     }
   }
 
-  destroy() {
-    if (this.animFrame) {
-      cancelAnimationFrame(this.animFrame)
-    }
-    if (this.app) {
-      // PixiJS 8 ResizePlugin.destroy() calls this._cancelResize() which is
-      // only assigned when `resizeTo` is set during init. Since we don't use
-      // `resizeTo`, the function is undefined and destroy() throws. Patch it
-      // before calling destroy.
+  private safeDestroyApp() {
+    if (!this.app) return
+    try {
+      // PixiJS 8 ResizePlugin.destroy() calls _cancelResize which is only
+      // assigned when resizeTo is used. Patch it to avoid TypeError.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const appAny = this.app as any
       if (typeof appAny._cancelResize !== "function") {
         appAny._cancelResize = () => {}
       }
       this.app.destroy()
-      this.app = null
+    } catch {
+      // Swallow errors from destroying a partially-initialized app
     }
+    this.app = null
+  }
+
+  destroy() {
+    this.destroyed = true
+    if (this.animFrame) {
+      cancelAnimationFrame(this.animFrame)
+    }
+    this.safeDestroyApp()
     this.agentSprites.clear()
     this.initialized = false
   }
