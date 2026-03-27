@@ -70,8 +70,28 @@ export function loadPersistedConfig(): {
 }
 
 /**
+ * Map an OpenClaw agent entry (from agents.list) to our Agent model.
+ * These are configured agents, not historical sessions.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function agentEntryToAgent(entry: any): Agent {
+  return {
+    id: entry.id,
+    name: entry.identity?.name ?? entry.name ?? entry.id,
+    status: "offline",
+    role: mapSessionRole(entry),
+    model: entry.model ?? "unknown",
+    currentTask: null,
+    tokensToday: 0,
+    tokensTotal: 0,
+    uptime: 0,
+    config: entry,
+  }
+}
+
+/**
  * Map an OpenClaw session to our Agent model.
- * OpenClaw sessions are the closest analogue to "agents" in our Hub.
+ * Used for session.created / session.updated events.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function sessionToAgent(session: any): Agent {
@@ -438,12 +458,22 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     if (!wsClient) return
 
     try {
-      // Fetch sessions list
-      const sessionsRes = await wsClient.request("sessions.list", {})
+      // Fetch configured agents (not historical sessions)
+      const agentsRes = await wsClient.request("agents.list", {})
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sessions = (sessionsRes as any)?.sessions ?? (sessionsRes as any)?.items ?? []
-      const agents = sessions.map(sessionToAgent)
-      set({ agents, sessions })
+      const agentEntries = (agentsRes as any)?.agents ?? []
+      const agents = agentEntries.map(agentEntryToAgent)
+      set({ agents })
+
+      // Fetch sessions for raw data (conversations, not agent list)
+      try {
+        const sessionsRes = await wsClient.request("sessions.list", {})
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sessions = (sessionsRes as any)?.sessions ?? (sessionsRes as any)?.items ?? []
+        set({ sessions })
+      } catch {
+        // sessions might not be available
+      }
 
       // Fetch presence
       try {

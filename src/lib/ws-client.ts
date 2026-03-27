@@ -189,7 +189,7 @@ export class WsClient {
     }
   }
 
-  private sendConnectRequest(nonce?: string): void {
+  private sendConnectRequest(_nonce?: string): void {
     const id = nextReqId()
 
     // Register as pending so we catch the hello-ok response
@@ -213,10 +213,10 @@ export class WsClient {
         minProtocol: 3,
         maxProtocol: 3,
         client: {
-          id: "openclaw-hub",
+          id: "openclaw-control-ui",
           version: "0.1.0",
           platform: "web",
-          mode: "operator",
+          mode: "ui",
         },
         role: "operator",
         scopes: ["operator.read", "operator.write"],
@@ -225,15 +225,7 @@ export class WsClient {
         permissions: {},
         auth: { token: this.apiKey },
         locale: navigator?.language ?? "en-US",
-        userAgent: "openclaw-hub/0.1.0",
-        ...(nonce
-          ? {
-              device: {
-                id: this.getDeviceId(),
-                nonce,
-              },
-            }
-          : {}),
+        userAgent: "openclaw-control-ui/0.1.0",
       },
     }
 
@@ -259,19 +251,6 @@ export class WsClient {
 
     // Notify handlers that we're fully connected
     this.notify({ type: "_connected", payload })
-  }
-
-  private getDeviceId(): string {
-    try {
-      let id = localStorage.getItem("openclaw-hub-device-id")
-      if (!id) {
-        id = `hub-${crypto.randomUUID()}`
-        localStorage.setItem("openclaw-hub-device-id", id)
-      }
-      return id
-    } catch {
-      return `hub-${Date.now().toString(36)}`
-    }
   }
 
   private scheduleReconnect(): void {
