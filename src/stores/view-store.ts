@@ -3,6 +3,11 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { ViewDefinition } from "@/lib/types"
+import {
+  fetchPlugin,
+  pluginToView,
+  exportPluginManifest,
+} from "@/lib/plugin-loader"
 
 // Built-in views registered at startup
 const BUILT_IN_VIEWS: ViewDefinition[] = [
@@ -34,21 +39,31 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
 
 interface ViewState {
   views: ViewDefinition[]
+  installing: boolean
+  installError: string | null
+
   registerView: (view: ViewDefinition) => void
   removeView: (id: string) => void
   getView: (id: string) => ViewDefinition | undefined
   getAiViews: () => ViewDefinition[]
   getBuiltInViews: () => ViewDefinition[]
+  getPlugins: () => ViewDefinition[]
+
+  // Plugin actions
+  installPlugin: (url: string) => Promise<ViewDefinition>
+  exportPlugin: (id: string) => string | null
+  clearInstallError: () => void
 }
 
 export const useViewStore = create<ViewState>()(
   persist(
     (set, get) => ({
       views: [...BUILT_IN_VIEWS],
+      installing: false,
+      installError: null,
 
       registerView(view: ViewDefinition) {
         set((s) => {
-          // Replace if same id exists
           const filtered = s.views.filter((v) => v.id !== view.id)
           return { views: [...filtered, view] }
         })
@@ -73,19 +88,52 @@ export const useViewStore = create<ViewState>()(
       getBuiltInViews() {
         return get().views.filter((v) => v.type === "built-in")
       },
+
+      getPlugins() {
+        return get().views.filter((v) => v.type === "plugin")
+      },
+
+      async installPlugin(url: string) {
+        set({ installing: true, installError: null })
+        try {
+          const plugin = await fetchPlugin(url)
+          const view = pluginToView(plugin)
+          set((s) => {
+            const filtered = s.views.filter((v) => v.id !== view.id)
+            return { views: [...filtered, view], installing: false }
+          })
+          return view
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to install plugin"
+          set({ installing: false, installError: message })
+          throw err
+        }
+      },
+
+      exportPlugin(id: string) {
+        const view = get().views.find((v) => v.id === id)
+        if (!view || !view.code) return null
+        return exportPluginManifest(view)
+      },
+
+      clearInstallError() {
+        set({ installError: null })
+      },
     }),
     {
       name: "openclaw-views",
+      partialize: (state) => ({ views: state.views }),
       merge: (persisted, current) => {
         const persistedState = persisted as Partial<ViewState> | undefined
         if (!persistedState?.views) return current
-        // Ensure built-in views are always present
-        const aiViews = persistedState.views.filter(
-          (v) => v.type === "ai-generated"
+        // Preserve installed plugins and AI views across reloads
+        const userViews = persistedState.views.filter(
+          (v) => v.type === "ai-generated" || v.type === "plugin"
         )
         return {
           ...current,
-          views: [...BUILT_IN_VIEWS, ...aiViews],
+          views: [...BUILT_IN_VIEWS, ...userViews],
         }
       },
     }

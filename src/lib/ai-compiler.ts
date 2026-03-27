@@ -4,32 +4,47 @@ import { transform } from "sucrase"
 import React from "react"
 
 /**
- * Compiles JSX source code from AI-generated views into a React component.
- * Uses Sucrase for fast browser-side JSX transformation.
+ * Compiles JSX/TSX source code into a React component at runtime.
+ * Supports:
+ *   - `export default function Foo() { ... }`
+ *   - `export default Foo`
+ *   - Named function/const `View`, `Component`, `App`, or the first function found
  */
-export function compileView(jsxSource: string): React.ComponentType | null {
+export function compileView(jsxSource: string): React.ComponentType<Record<string, unknown>> | null {
   try {
-    // Transform JSX to JS
+    // Transform JSX + TypeScript to plain JS
     const { code } = transform(jsxSource, {
-      transforms: ["jsx"],
+      transforms: ["jsx", "typescript"],
       jsxRuntime: "classic",
       production: true,
     })
 
-    // Create a function that returns the component
-    // Inject available scope: React, hooks, libraries
+    // Wrap in a module-style factory:
+    // - We provide a `exports` object to capture `export default`
+    // - Sucrase turns `export default X` into `exports.default = X`
     const wrappedCode = `
+      var exports = {};
       ${code}
 
-      // Find the default export or first function
-      if (typeof TokenChart !== 'undefined') return TokenChart;
+      // 1. Check for default export (Sucrase output)
+      if (exports.default) return exports.default;
+
+      // 2. Check common component names
       if (typeof View !== 'undefined') return View;
       if (typeof Component !== 'undefined') return Component;
       if (typeof App !== 'undefined') return App;
+      if (typeof Plugin !== 'undefined') return Plugin;
+
+      // 3. Scan exports for any function/component
+      var keys = Object.keys(exports);
+      for (var i = 0; i < keys.length; i++) {
+        var val = exports[keys[i]];
+        if (typeof val === 'function') return val;
+      }
+
       return null;
     `
 
-    // Create function with injected scope
     const factory = new Function(
       "React",
       "useState",
@@ -37,24 +52,9 @@ export function compileView(jsxSource: string): React.ComponentType | null {
       "useMemo",
       "useCallback",
       "useRef",
-      "useAgentData",
-      "BarChart",
-      "Bar",
-      "XAxis",
-      "YAxis",
-      "Tooltip",
-      "ResponsiveContainer",
-      "LineChart",
-      "Line",
-      "PieChart",
-      "Pie",
-      "Cell",
-      "Area",
-      "AreaChart",
       wrappedCode
     )
 
-    // We'll inject the actual libraries lazily when rendering
     const component = factory(
       React,
       React.useState,
@@ -62,20 +62,6 @@ export function compileView(jsxSource: string): React.ComponentType | null {
       React.useMemo,
       React.useCallback,
       React.useRef,
-      null, // useAgentData - injected at render time
-      // Recharts placeholders - will be lazy loaded
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null,
-      () => null
     )
 
     return component

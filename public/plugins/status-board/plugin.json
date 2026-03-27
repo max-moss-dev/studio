@@ -1,0 +1,9 @@
+{
+  "id": "status-board",
+  "title": "Status Board",
+  "icon": "sparkles",
+  "description": "A simple agent status overview with online/offline counts",
+  "author": "studio",
+  "version": "0.1.0",
+  "entry": "view.tsx"
+}
