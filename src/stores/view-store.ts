@@ -35,6 +35,18 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
     icon: "building-2",
     type: "built-in",
   },
+  {
+    id: "settings",
+    title: "Settings",
+    icon: "settings",
+    type: "built-in",
+  },
+  {
+    id: "view-picker",
+    title: "New Tab",
+    icon: "layout-grid",
+    type: "built-in",
+  },
 ]
 
 interface ViewState {

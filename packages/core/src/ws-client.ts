@@ -7,11 +7,117 @@
  *   - Tick keepalive based on policy.tickIntervalMs
  */
 
+import * as ed from "@noble/ed25519"
+import { sha512 } from "@noble/hashes/sha2.js"
+
+// Configure @noble/ed25519 to use sha512
+ed.hashes.sha512 = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m))
+
 type MessageHandler = (data: unknown) => void
 
 let _reqId = 0
 function nextReqId(): string {
   return `hub-${Date.now().toString(36)}-${(++_reqId).toString(36)}`
+}
+
+// --- Ed25519 device identity helpers ---
+
+const STORAGE_KEY = "openclaw-device-ed25519-v2"
+
+function toBase64url(buf: Uint8Array): string {
+  return btoa(String.fromCharCode(...buf))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
+  }
+  return bytes
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("")
+}
+
+interface StoredKeypair {
+  privateKey: string // hex
+  publicKey: string  // hex
+}
+
+function loadOrCreateKeypair(): StoredKeypair {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      return JSON.parse(stored)
+    }
+  } catch {
+    // ignore
+  }
+
+  // Generate new Ed25519 keypair
+  const privateKey = ed.utils.randomSecretKey()
+  const publicKey = ed.getPublicKey(privateKey)
+
+  const kp: StoredKeypair = {
+    privateKey: bytesToHex(privateKey),
+    publicKey: bytesToHex(publicKey),
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(kp))
+  } catch {
+    // ignore
+  }
+
+  return kp
+}
+
+interface DeviceBlockOpts {
+  nonce: string
+  clientId: string
+  clientMode: string
+  role: string
+  scopes: string[]
+  token: string
+}
+
+async function buildDeviceBlock(opts: DeviceBlockOpts): Promise<Record<string, unknown>> {
+  const kp = loadOrCreateKeypair()
+  const signedAt = Date.now()
+  const privateKeyBytes = hexToBytes(kp.privateKey)
+  const rawPubBytes = hexToBytes(kp.publicKey)
+
+  // Device ID = SHA-256(raw 32-byte public key)
+  const hash = await crypto.subtle.digest("SHA-256", rawPubBytes)
+  const fingerprint = bytesToHex(new Uint8Array(hash))
+
+  // v2 pipe-delimited payload
+  const payloadStr = [
+    "v2",
+    fingerprint,
+    opts.clientId,
+    opts.clientMode,
+    opts.role,
+    opts.scopes.join(","),
+    signedAt.toString(),
+    opts.token,
+    opts.nonce,
+  ].join("|")
+
+  const payloadBytes = new TextEncoder().encode(payloadStr)
+  const signature = ed.sign(payloadBytes, privateKeyBytes)
+
+  return {
+    id: fingerprint,
+    publicKey: toBase64url(rawPubBytes),
+    signature: toBase64url(signature),
+    signedAt,
+    nonce: opts.nonce,
+  }
 }
 
 // Pending request waiting for a response
@@ -154,7 +260,9 @@ export class WsClient {
 
     if (eventName === "connect.challenge") {
       // Gateway is challenging us — respond with connect request
-      this.sendConnectRequest(frame.payload?.nonce)
+      const nonce = frame.payload?.nonce
+      console.log("[WsClient] Got connect.challenge, nonce:", nonce, "payload:", JSON.stringify(frame.payload))
+      this.sendConnectRequest(nonce)
       return
     }
 
@@ -178,7 +286,8 @@ export class WsClient {
         }
         pending.resolve(frame.payload)
       } else {
-        pending.reject(frame.error || { message: "Request failed" })
+        console.error("[WsClient] RPC failed, full frame:", JSON.stringify(frame))
+        pending.reject(frame.error ?? frame.payload ?? { message: "Request failed" })
       }
       return
     }
@@ -189,7 +298,7 @@ export class WsClient {
     }
   }
 
-  private sendConnectRequest(_nonce?: string): void {
+  private async sendConnectRequest(nonce?: string): Promise<void> {
     const id = nextReqId()
 
     // Register as pending so we catch the hello-ok response
@@ -201,35 +310,71 @@ export class WsClient {
 
     this.pendingReqs.set(id, {
       resolve: () => {},
-      reject: (err) => console.error("[WsClient] Connect rejected:", err),
+      reject: (err) => {
+        console.error("[WsClient] Connect rejected:", err)
+        // Stop reconnecting on auth/handshake errors — retrying won't help
+        this._intentionalClose = true
+        this.cleanup()
+        if (this.ws) {
+          this.ws.close()
+          this.ws = null
+        }
+        this._connected = false
+        this._authenticated = false
+        this.notify({ type: "_disconnected" })
+      },
       timer,
     })
 
-    const connectReq = {
-      type: "req",
-      id,
-      method: "connect",
-      params: {
-        minProtocol: 3,
-        maxProtocol: 3,
-        client: {
-          id: "openclaw-control-ui",
-          version: "0.1.0",
-          platform: "web",
-          mode: "ui",
-        },
-        role: "operator",
-        scopes: ["operator.read", "operator.write"],
-        caps: [],
-        commands: [],
-        permissions: {},
-        auth: { token: this.apiKey },
-        locale: navigator?.language ?? "en-US",
-        userAgent: "openclaw-control-ui/0.1.0",
-      },
+    // Build device identity block using Ed25519
+    const clientId = "openclaw-control-ui"
+    const clientMode = "ui"
+    const role = "operator"
+    const scopes = ["operator.read", "operator.write", "operator.admin"]
+
+    let device: Record<string, unknown> | undefined
+    try {
+      if (nonce) {
+        device = await buildDeviceBlock({
+          nonce,
+          clientId,
+          clientMode,
+          role,
+          scopes,
+          token: this.apiKey,
+        })
+      } else {
+        console.warn("[WsClient] No nonce — cannot build device identity")
+      }
+    } catch (err) {
+      console.warn("[WsClient] Could not build device identity:", err)
     }
 
-    this.sendRaw(connectReq)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const params: Record<string, any> = {
+      minProtocol: 3,
+      maxProtocol: 3,
+      client: {
+        id: clientId,
+        version: "0.1.0",
+        platform: "web",
+        mode: clientMode,
+      },
+      role,
+      scopes,
+      caps: [],
+      commands: [],
+      permissions: {},
+      auth: { token: this.apiKey },
+      locale: navigator?.language ?? "en-US",
+      userAgent: "openclaw-control-ui/0.1.0",
+    }
+
+    if (device) {
+      params.device = device
+    }
+
+    this.sendRaw({ type: "req", id, method: "connect", params })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

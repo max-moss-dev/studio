@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenClaw Hub",
+  title: "Studio",
   description: "AI Agent Management Platform",
 };
 

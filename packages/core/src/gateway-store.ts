@@ -76,11 +76,11 @@ export function loadPersistedConfig(): {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function agentEntryToAgent(entry: any): Agent {
   return {
-    id: entry.id,
+    id: entry.id ?? entry.agentId ?? uid(),
     name: entry.identity?.name ?? entry.name ?? entry.id,
     status: "offline",
     role: mapSessionRole(entry),
-    model: entry.model ?? "unknown",
+    model: typeof entry.model === "string" ? entry.model : entry.model?.primary ?? entry.model?.id ?? "unknown",
     currentTask: null,
     tokensToday: 0,
     tokensTotal: 0,
@@ -100,7 +100,7 @@ function sessionToAgent(session: any): Agent {
     name: session.name ?? session.label ?? session.id ?? "Agent",
     status: mapSessionStatus(session.status ?? session.state),
     role: mapSessionRole(session),
-    model: session.model ?? session.agent?.model ?? "unknown",
+    model: (typeof session.model === "string" ? session.model : session.model?.primary ?? session.agent?.model?.primary ?? session.model?.id ?? session.agent?.model ?? "unknown") as string,
     currentTask: session.currentTask ?? session.lastMessage?.content?.slice(0, 80) ?? null,
     tokensToday: session.metrics?.tokensToday ?? session.usage?.tokens ?? 0,
     tokensTotal: session.metrics?.tokensTotal ?? session.usage?.totalTokens ?? 0,
@@ -536,6 +536,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     try {
       // Fetch configured agents (not historical sessions)
       const agentsRes = await wsClient.request("agents.list", {})
+      console.log("[Gateway] agents.list response:", JSON.stringify(agentsRes, null, 2))
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const agentEntries = (agentsRes as any)?.agents ?? []
       const agents = agentEntries.map(agentEntryToAgent)
@@ -551,13 +552,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         // sessions might not be available
       }
 
-      // Fetch presence
-      try {
-        const presenceRes = await wsClient.request("system.presence", {})
-        set({ presence: (presenceRes ?? {}) as Record<string, unknown> })
-      } catch {
-        // presence might not be available
-      }
+      // Presence is received via events (system-presence / presence),
+      // no need to poll — the gateway pushes updates.
     } catch (err) {
       console.error("[Gateway] Failed to fetch initial data:", err)
     }
@@ -641,7 +637,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       switch (msg.type) {
         case "agent.message":
           wsClient.request("chat.send", {
-            sessionKey: msg.agentId,
+            key: msg.agentId,
             message: msg.content,
             idempotencyKey: uid(),
           }).catch((e) => console.error("[Gateway] chat.send failed:", e))
@@ -649,21 +645,44 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
         case "agent.command":
           wsClient.request("sessions.send", {
-            sessionKey: msg.agentId,
-            command: msg.command,
+            key: msg.agentId,
+            message: msg.command,
           }).catch((e) => console.error("[Gateway] sessions.send failed:", e))
           break
 
-        case "agent.create":
-          wsClient.request("sessions.create", {
-            ...msg.config,
-          }).catch((e) => console.error("[Gateway] sessions.create failed:", e))
+        case "agent.create": {
+          // agents.create requires `workspace` (filesystem path) and `name`
+          const cfg = msg.config ?? {}
+          const params: Record<string, unknown> = {
+            workspace: cfg.config?.workspace ?? `~/.openclaw/agents/${(cfg.name ?? "agent").toLowerCase().replace(/\s+/g, "-")}`,
+          }
+
+          if (cfg.name) params.name = cfg.name
+
+          wsClient.request("agents.create", params).then((res) => {
+            if (res && typeof res === "object") {
+              const agent = agentEntryToAgent(res)
+              set((s) => ({
+                agents: s.agents.some((a) => a.id === agent.id)
+                  ? s.agents
+                  : [...s.agents, agent],
+              }))
+            }
+          }).catch((e) => {
+            const msg = e?.message ?? (typeof e === "object" ? JSON.stringify(e) : String(e))
+            console.error("[Gateway] agents.create failed:", msg, e)
+          })
           break
+        }
 
         case "agent.delete":
-          wsClient.request("sessions.delete", {
-            sessionKey: msg.agentId,
-          }).catch((e) => console.error("[Gateway] sessions.delete failed:", e))
+          wsClient.request("agents.delete", {
+            agentId: msg.agentId,
+          }).then(() => {
+            set((s) => ({
+              agents: s.agents.filter((a) => a.id !== msg.agentId),
+            }))
+          }).catch((e) => console.error("[Gateway] agents.delete failed:", e))
           break
 
         case "task.create":

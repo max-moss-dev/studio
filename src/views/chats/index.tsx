@@ -20,10 +20,10 @@ import { uid } from "@/lib/mock-data"
 import { useGatewayStore } from "@/stores/gateway-store"
 
 const STATUS_DOT: Record<string, string> = {
-  online: "bg-emerald-500",
-  busy: "bg-amber-500",
-  offline: "bg-zinc-500",
-  error: "bg-red-500",
+  online: "bg-[#98c379]",
+  busy: "bg-[#e5c07b]",
+  offline: "bg-[#5c6370]",
+  error: "bg-[#e06c75]",
 }
 
 function formatTime(ts: number): string {

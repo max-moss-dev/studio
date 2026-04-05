@@ -2,21 +2,21 @@
 
 import { useState, useEffect, useMemo, lazy, Suspense } from "react"
 import { Header } from "./header"
-import { TabBar } from "./tab-bar"
 import { ConnectionDialog } from "./connection-dialog"
-import { ViewPickerDialog } from "./view-picker-dialog"
 import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
 import { useGatewayStore, loadPersistedConfig } from "@/stores/gateway-store"
 import { useGateway } from "@/hooks/use-gateway"
 import { compileView } from "@/lib/ai-compiler"
-import { Loader2, AlertTriangle } from "lucide-react"
+import { Loader2, AlertTriangle, Radio } from "lucide-react"
 
 // Lazy load built-in views
 const AgentManagerView = lazy(() => import("@/views/agent-manager"))
 const KanbanView = lazy(() => import("@/views/kanban"))
 const ChatsView = lazy(() => import("@/views/chats"))
 const OfficeView = lazy(() => import("@/views/office"))
+const SettingsView = lazy(() => import("@/views/settings"))
+const ViewPickerView = lazy(() => import("@/views/view-picker"))
 
 function ViewFallback() {
   return (
@@ -83,6 +83,12 @@ function ActiveView() {
   if (activeTab.viewId === "office") {
     return <Suspense fallback={<ViewFallback />}><OfficeView {...viewProps} /></Suspense>
   }
+  if (activeTab.viewId === "settings") {
+    return <Suspense fallback={<ViewFallback />}><SettingsView /></Suspense>
+  }
+  if (activeTab.viewId === "view-picker") {
+    return <Suspense fallback={<ViewFallback />}><ViewPickerView /></Suspense>
+  }
 
   // Plugin or AI-generated views — compile and render at runtime
   if (activeTab.viewId.startsWith("plugin-") || activeTab.viewId.startsWith("ai-")) {
@@ -96,12 +102,39 @@ function ActiveView() {
   )
 }
 
+function Footer() {
+  const connected = useGatewayStore((s) => s.connected)
+  const mockMode = useGatewayStore((s) => s.mockMode)
+
+  return (
+    <footer className="flex h-7 items-center justify-between border-t bg-header-bg px-4 shrink-0">
+      <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+        <Radio className={`h-2.5 w-2.5 ${connected ? "text-[#98c379]" : "text-muted-foreground"}`} />
+        <span>
+          {connected
+            ? mockMode
+              ? "mock://localhost"
+              : "ws://localhost:18789"
+            : "disconnected"}
+        </span>
+        <span className="text-border">|</span>
+        <span>{connected ? "12ms" : "--"}</span>
+      </div>
+      <div className="text-[10px] text-muted-foreground">
+        Studio v0.1.0
+      </div>
+    </footer>
+  )
+}
+
 export function AppShell() {
-  const [showViewPicker, setShowViewPicker] = useState(false)
   const connected = useGatewayStore((s) => s.connected)
   const connectGateway = useGatewayStore((s) => s.connectGateway)
   const connectMock = useGatewayStore((s) => s.connectMock)
-  const [showConnection, setShowConnection] = useState(false)
+  const openTab = useTabStore((s) => s.openTab)
+  const tabs = useTabStore((s) => s.tabs)
+  const setActiveTab = useTabStore((s) => s.setActiveTab)
+  const [showInitialConnection, setShowInitialConnection] = useState(false)
 
   // Auto-connect on mount from persisted config
   useEffect(() => {
@@ -113,39 +146,24 @@ export function AppShell() {
         connectGateway(config.url, config.apiKey)
       }
     } else {
-      setShowConnection(true)
+      // No persisted config — open settings tab
+      const existing = tabs.find((t) => t.viewId === "settings")
+      if (existing) {
+        setActiveTab(existing.id)
+      } else {
+        openTab("settings", "Settings", "settings")
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header onOpenSettings={() => setShowConnection(true)} />
-      <TabBar onNewTab={() => setShowViewPicker(true)} />
+      <Header />
       <main className="flex-1 overflow-hidden">
-        {connected ? (
-          <ActiveView />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
-            <p className="text-sm">Connect to a Gateway to get started</p>
-            <button
-              onClick={() => setShowConnection(true)}
-              className="text-sm text-primary hover:underline cursor-pointer"
-            >
-              Open Connection Settings
-            </button>
-          </div>
-        )}
+        <ActiveView />
       </main>
-
-      <ConnectionDialog
-        open={showConnection}
-        onOpenChange={setShowConnection}
-      />
-      <ViewPickerDialog
-        open={showViewPicker}
-        onOpenChange={setShowViewPicker}
-      />
+      <Footer />
     </div>
   )
 }

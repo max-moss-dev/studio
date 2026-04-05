@@ -18,10 +18,10 @@ import { Plus, Clock, Coins, GripVertical, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const COLUMNS: { id: TaskStatus; title: string; color: string }[] = [
-  { id: "queue", title: "Queue", color: "text-zinc-400" },
-  { id: "in_progress", title: "In Progress", color: "text-blue-400" },
-  { id: "review", title: "Review", color: "text-purple-400" },
-  { id: "done", title: "Done", color: "text-emerald-400" },
+  { id: "queue", title: "Queue", color: "text-[#5c6370]" },
+  { id: "in_progress", title: "In Progress", color: "text-[#61afef]" },
+  { id: "review", title: "Review", color: "text-[#e5c07b]" },
+  { id: "done", title: "Done", color: "text-[#98c379]" },
 ]
 
 function formatDuration(seconds: number): string {

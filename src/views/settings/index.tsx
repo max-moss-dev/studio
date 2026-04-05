@@ -1,24 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { Wifi, FlaskConical, LogOut } from "lucide-react"
 
-interface ConnectionDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}
-
-export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) {
+export default function SettingsView() {
   const [url, setUrl] = useState("ws://localhost:18789")
   const [apiKey, setApiKey] = useState("")
   const connected = useGatewayStore((s) => s.connected)
@@ -31,12 +19,10 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
   function handleConnect() {
     if (!url.trim()) return
     connectGateway(url.trim(), apiKey.trim())
-    onOpenChange(false)
   }
 
   function handleMock() {
     connectMock()
-    onOpenChange(false)
   }
 
   function handleDisconnect() {
@@ -49,23 +35,22 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Gateway Connection</DialogTitle>
-          <DialogDescription>
+    <div className="flex h-full items-start justify-center overflow-auto py-12">
+      <div className="w-full max-w-md flex flex-col gap-6">
+        <div>
+          <h2 className="text-lg font-semibold">Settings</h2>
+          <p className="text-sm text-muted-foreground mt-1">
             {connected
               ? mockMode
                 ? "Running in mock mode with simulated agents."
                 : `Connected to ${currentUrl}`
               : "Connect to your Gateway to manage agents."}
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
 
-        {/* Connected state — show status + disconnect */}
         {connected && (
-          <div className="flex flex-col gap-4 py-2">
-            <div className="rounded-lg border bg-muted/50 p-3">
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border bg-card p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium">
@@ -92,9 +77,8 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
           </div>
         )}
 
-        {/* Disconnected state — show connect form */}
         {!connected && (
-          <div className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="gateway-url">
                 Gateway URL
@@ -156,7 +140,7 @@ export function ConnectionDialog({ open, onOpenChange }: ConnectionDialogProps) 
             </div>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   )
 }

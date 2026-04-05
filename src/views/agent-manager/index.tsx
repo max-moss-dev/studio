@@ -30,10 +30,10 @@ import { cn } from "@/lib/utils"
 import { uid } from "@/lib/mock-data"
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
-  online: "bg-emerald-500",
-  busy: "bg-amber-500",
-  offline: "bg-zinc-500",
-  error: "bg-red-500",
+  online: "bg-[#98c379]",
+  busy: "bg-[#e5c07b]",
+  offline: "bg-[#5c6370]",
+  error: "bg-[#e06c75]",
 }
 
 const STATUS_LABELS: Record<AgentStatus, string> = {
@@ -44,11 +44,11 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
 }
 
 const ROLE_COLORS: Record<AgentRole, string> = {
-  orchestrator: "text-blue-400 bg-blue-400/10",
-  coder: "text-emerald-400 bg-emerald-400/10",
-  reviewer: "text-purple-400 bg-purple-400/10",
-  researcher: "text-orange-400 bg-orange-400/10",
-  custom: "text-zinc-400 bg-zinc-400/10",
+  orchestrator: "text-[#61afef] bg-[#61afef]/10",
+  coder: "text-[#98c379] bg-[#98c379]/10",
+  reviewer: "text-[#c678dd] bg-[#c678dd]/10",
+  researcher: "text-[#e5c07b] bg-[#e5c07b]/10",
+  custom: "text-[#5c6370] bg-[#5c6370]/10",
 }
 
 function formatUptime(seconds: number): string {
@@ -165,9 +165,9 @@ export default function AgentManagerView({ agents, send }: ViewProps) {
         {/* Agent table */}
         <ScrollArea className="flex-1">
           <div className="divide-y">
-            {filtered.map((agent) => (
+            {filtered.map((agent, idx) => (
               <button
-                key={agent.id}
+                key={agent.id ?? idx}
                 onClick={() => setSelectedAgent(agent)}
                 className={cn(
                   "flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer",
@@ -416,7 +416,7 @@ export default function AgentManagerView({ agents, send }: ViewProps) {
                 <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
               </select>
             </div>
-            <Button onClick={handleAddAgent} className="mt-2">
+            <Button onClick={handleAddAgent} disabled={!newAgentName.trim()} className="mt-2">
               Create Agent
             </Button>
           </div>
