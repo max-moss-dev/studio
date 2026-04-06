@@ -552,6 +552,20 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         // sessions might not be available
       }
 
+      // Fetch available models
+      try {
+        const modelsRes = await wsClient.request("models.list", {})
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const modelsData = modelsRes as any
+        const models: string[] = (modelsData?.models ?? modelsData?.data ?? []).map(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (m: any) => typeof m === "string" ? m : m.id ?? m.name ?? ""
+        ).filter(Boolean)
+        set({ models })
+      } catch {
+        // models.list might not be available
+      }
+
       // Presence is received via events (system-presence / presence),
       // no need to poll — the gateway pushes updates.
     } catch (err) {
@@ -570,6 +584,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     messages: {},
     sessions: [],
     presence: {},
+    models: [] as string[],
 
     connectGateway(url: string, apiKey: string) {
       // Clean up existing connections
@@ -618,6 +633,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         messages: {},
         sessions: [],
         presence: {},
+        models: [],
       })
     },
 
@@ -651,23 +667,18 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           break
 
         case "agent.create": {
-          // agents.create requires `workspace` (filesystem path) and `name`
+          // agents.create accepts: workspace (required), name
           const cfg = msg.config ?? {}
+          const agentName = cfg.name ?? "agent"
           const params: Record<string, unknown> = {
-            workspace: cfg.config?.workspace ?? `~/.openclaw/agents/${(cfg.name ?? "agent").toLowerCase().replace(/\s+/g, "-")}`,
+            workspace: cfg.config?.workspace ?? `~/.openclaw/agents/${agentName.toLowerCase().replace(/\s+/g, "-")}`,
           }
 
           if (cfg.name) params.name = cfg.name
 
-          wsClient.request("agents.create", params).then((res) => {
-            if (res && typeof res === "object") {
-              const agent = agentEntryToAgent(res)
-              set((s) => ({
-                agents: s.agents.some((a) => a.id === agent.id)
-                  ? s.agents
-                  : [...s.agents, agent],
-              }))
-            }
+          wsClient.request("agents.create", params).then(() => {
+            // Refetch full agent list to get complete data including model
+            fetchInitialData()
           }).catch((e) => {
             const msg = e?.message ?? (typeof e === "object" ? JSON.stringify(e) : String(e))
             console.error("[Gateway] agents.create failed:", msg, e)

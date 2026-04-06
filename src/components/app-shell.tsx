@@ -63,12 +63,12 @@ function DynamicView({ viewId, viewProps }: { viewId: string; viewProps: Record<
 function ActiveView() {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const tabs = useTabStore((s) => s.tabs)
-  const { agents, events, tasks, messages, send } = useGateway()
+  const { agents, events, tasks, messages, send, models } = useGateway()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab) return null
 
-  const viewProps = { agents, events, tasks, messages, send }
+  const viewProps = { agents, events, tasks, messages, send, models }
 
   // Built-in views
   if (activeTab.viewId === "agent-manager") {

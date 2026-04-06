@@ -66,14 +66,12 @@ function formatTokens(n: number): string {
 
 type FilterStatus = "all" | AgentStatus
 
-export default function AgentManagerView({ agents, send }: ViewProps) {
+export default function AgentManagerView({ agents, send, models }: ViewProps) {
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all")
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [newAgentName, setNewAgentName] = useState("")
-  const [newAgentRole, setNewAgentRole] = useState<AgentRole>("coder")
-  const [newAgentModel, setNewAgentModel] = useState("claude-sonnet-4-6")
 
   const filtered = agents.filter((a) => {
     if (statusFilter !== "all" && a.status !== statusFilter) return false
@@ -96,8 +94,6 @@ export default function AgentManagerView({ agents, send }: ViewProps) {
       type: "agent.create",
       config: {
         name: newAgentName.trim(),
-        role: newAgentRole,
-        model: newAgentModel,
       },
     })
     setNewAgentName("")
@@ -362,6 +358,7 @@ export default function AgentManagerView({ agents, send }: ViewProps) {
                   size="sm"
                   className="flex-1 gap-1.5 text-destructive hover:text-destructive"
                   onClick={() => handleDelete(selectedAgent.id)}
+                  disabled={selectedAgent.name === "main" || selectedAgent.id === "main"}
                 >
                   <Archive className="h-3.5 w-3.5" />
                   Delete
@@ -389,32 +386,9 @@ export default function AgentManagerView({ agents, send }: ViewProps) {
                 value={newAgentName}
                 onChange={(e) => setNewAgentName(e.target.value)}
               />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Role</label>
-              <select
-                value={newAgentRole}
-                onChange={(e) => setNewAgentRole(e.target.value as AgentRole)}
-                className="h-9 rounded-md border bg-transparent px-3 text-sm"
-              >
-                <option value="orchestrator">Orchestrator</option>
-                <option value="coder">Coder</option>
-                <option value="reviewer">Reviewer</option>
-                <option value="researcher">Researcher</option>
-                <option value="custom">Custom</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Model</label>
-              <select
-                value={newAgentModel}
-                onChange={(e) => setNewAgentModel(e.target.value)}
-                className="h-9 rounded-md border bg-transparent px-3 text-sm"
-              >
-                <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                <option value="claude-opus-4-6">Claude Opus 4.6</option>
-                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-              </select>
+              <p className="text-xs text-muted-foreground">
+                Model and other settings can be configured after creation.
+              </p>
             </div>
             <Button onClick={handleAddAgent} disabled={!newAgentName.trim()} className="mt-2">
               Create Agent

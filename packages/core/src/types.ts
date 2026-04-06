@@ -97,6 +97,7 @@ export interface ViewProps {
   events: AgentEvent[]
   tasks: Task[]
   messages: Record<string, Message[]>
+  models: string[]
   send: (msg: GatewayMessage) => void
 }
 
