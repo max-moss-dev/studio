@@ -17,6 +17,8 @@ const ChatsView = lazy(() => import("@/views/chats"))
 const OfficeView = lazy(() => import("@/views/office"))
 const SettingsView = lazy(() => import("@/views/settings"))
 const ViewPickerView = lazy(() => import("@/views/view-picker"))
+const MediaView = lazy(() => import("@/views/media"))
+const TodoView = lazy(() => import("@/views/todo"))
 
 function ViewFallback() {
   return (
@@ -68,17 +70,18 @@ function ActiveView() {
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab) return null
 
+  const tabState = activeTab.state ?? {}
   const viewProps = { agents, events, tasks, messages, send, models }
 
   // Built-in views
   if (activeTab.viewId === "agent-manager") {
-    return <Suspense fallback={<ViewFallback />}><AgentManagerView {...viewProps} /></Suspense>
+    return <Suspense fallback={<ViewFallback />}><AgentManagerView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
   }
   if (activeTab.viewId === "kanban") {
     return <Suspense fallback={<ViewFallback />}><KanbanView {...viewProps} /></Suspense>
   }
   if (activeTab.viewId === "chats") {
-    return <Suspense fallback={<ViewFallback />}><ChatsView {...viewProps} /></Suspense>
+    return <Suspense fallback={<ViewFallback />}><ChatsView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
   }
   if (activeTab.viewId === "office") {
     return <Suspense fallback={<ViewFallback />}><OfficeView {...viewProps} /></Suspense>
@@ -88,6 +91,12 @@ function ActiveView() {
   }
   if (activeTab.viewId === "view-picker") {
     return <Suspense fallback={<ViewFallback />}><ViewPickerView /></Suspense>
+  }
+  if (activeTab.viewId === "media") {
+    return <Suspense fallback={<ViewFallback />}><MediaView initialPath={tabState.path as string} /></Suspense>
+  }
+  if (activeTab.viewId === "todo") {
+    return <Suspense fallback={<ViewFallback />}><TodoView /></Suspense>
   }
 
   // Plugin or AI-generated views — compile and render at runtime

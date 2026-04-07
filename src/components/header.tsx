@@ -9,6 +9,8 @@ import {
   Sparkles,
   Settings,
   LayoutGrid,
+  FileText,
+  CheckCircle,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useGatewayStore } from "@/stores/gateway-store"
@@ -23,6 +25,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   sparkles: Sparkles,
   settings: Settings,
   "layout-grid": LayoutGrid,
+  "file-text": FileText,
+  "check-circle": CheckCircle,
 }
 
 export function Header() {

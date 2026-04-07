@@ -13,6 +13,96 @@ import { WsClient } from "./ws-client"
 import { MockGateway } from "./mock-gateway"
 import { uid } from "./mock-data"
 
+// --- Media Tool Proxy ---
+
+const MEDIA_TOOLS_PROMPT = `
+You have access to a Media Knowledge Base. You MUST use it proactively:
+
+1. ALWAYS check the knowledge base FIRST when asked about anything — use media.list and media.read before answering.
+2. ALWAYS save important information to the knowledge base — research results, conversation summaries, key decisions, action items.
+3. ALWAYS organize files into folders: notes/, research/, tasks/, summaries/, etc.
+
+Tool call format — include a JSON block in your response:
+
+\`\`\`tool
+{"tool": "media.list", "params": {"path": ""}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "media.read", "params": {"path": "notes/research.md"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "media.write", "params": {"path": "research/topic.md", "content": "# Topic\\n\\nContent here"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "media.delete", "params": {"path": "old-file.md"}}
+\`\`\`
+
+Available tools:
+
+Media (knowledge base):
+- media.list: List files (optional path for subdirectory)
+- media.read: Read a file's content
+- media.write: Create or update a file (markdown supported)
+- media.delete: Delete a file
+
+Tasks (shared todo list):
+- todo.add: Add a task (params: text, category: general|bug|feature|research|urgent|idea, agentName)
+- todo.list: List all tasks
+- todo.complete: Mark a task done (params: id)
+
+Tips:
+- Use GFM markdown: tables, task lists (- [ ] / - [x]), code blocks, blockquotes
+- Organize media into folders: notes/, research/, tasks/, summaries/
+- When you discover action items, add them via todo.add
+- When completing work, mark tasks done via todo.complete
+
+Do NOT wait for the user to ask you to save — proactively write notes, summaries, and findings. Do NOT answer from memory alone — check the knowledge base first.
+Always use the \`\`\`tool code fence format for tool calls.
+`.trim()
+
+// Track which agents have received the media tools prompt
+const mediaPromptSent = new Set<string>()
+
+/**
+ * Parse tool call blocks from agent message text.
+ * Looks for ```tool\n{...}\n``` blocks.
+ */
+function parseToolCalls(text: string): Array<{ tool: string; params: Record<string, unknown> }> {
+  const results: Array<{ tool: string; params: Record<string, unknown> }> = []
+  const regex = /```tool\s*\n([\s\S]*?)```/g
+  let match
+  while ((match = regex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim())
+      if (parsed.tool) {
+        results.push({ tool: parsed.tool, params: parsed.params ?? {} })
+      }
+    } catch {
+      // not valid JSON, skip
+    }
+  }
+  return results
+}
+
+/**
+ * Execute a media tool call locally and return the result.
+ */
+async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+  try {
+    const res = await fetch("/api/media/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, params }),
+    })
+    return await res.json()
+  } catch (err) {
+    return { error: String(err) }
+  }
+}
+
 const MAX_EVENTS = 1000
 
 interface GatewayState {
@@ -53,6 +143,31 @@ function persistConfig(url: string, apiKey: string, mockMode: boolean) {
   } catch {
     // localStorage unavailable
   }
+}
+
+const MESSAGES_KEY = "openclaw-messages"
+
+function persistMessages(messages: Record<string, Message[]>) {
+  try {
+    // Keep only last 100 messages per agent to avoid bloating localStorage
+    const trimmed: Record<string, Message[]> = {}
+    for (const [id, msgs] of Object.entries(messages)) {
+      trimmed[id] = msgs.slice(-100)
+    }
+    localStorage.setItem(MESSAGES_KEY, JSON.stringify(trimmed))
+  } catch {
+    // ignore
+  }
+}
+
+function loadPersistedMessages(): Record<string, Message[]> {
+  try {
+    const raw = localStorage.getItem(MESSAGES_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {
+    // ignore
+  }
+  return {}
 }
 
 export function loadPersistedConfig(): {
@@ -138,6 +253,24 @@ function mapSessionRole(session: any): Agent["role"] {
   if (role.includes("review")) return "reviewer"
   if (role.includes("research")) return "researcher"
   return "custom"
+}
+
+/**
+ * Extract the relevant agent/sender ID from a sessionKey.
+ * Format: "agent:{targetAgent}:{sender}" e.g. "agent:main:test"
+ * For webchat sessions, the sender part identifies which agent initiated the chat,
+ * so we use the 3rd segment if it matches a known agent, otherwise fall back to 2nd.
+ */
+function extractAgentId(sessionKey: string | undefined): string {
+  if (!sessionKey) return "unknown"
+  if (sessionKey.startsWith("agent:")) {
+    const parts = sessionKey.split(":")
+    // parts[1] = target agent (usually "main"), parts[2] = sender/context
+    // For webchat: "agent:main:test" → return "test" (the sender)
+    // For simple: "agent:main:main" → return "main"
+    return parts[2] ?? parts[1] ?? sessionKey
+  }
+  return sessionKey
 }
 
 export const useGatewayStore = create<GatewayState>((set, get) => {
@@ -266,6 +399,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleOpenClawEvent(eventName: string, payload: any, seq?: number) {
+    console.log("[Gateway] event:", eventName, payload ? JSON.stringify(payload).slice(0, 200) : "")
     // Map OpenClaw events to our store
     switch (eventName) {
       // Session/presence events
@@ -321,9 +455,64 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       // state is "delta" (streaming), "final" (complete), "error", or "aborted"
       case "chat": {
         if (!payload) break
-        const agentId = payload.sessionKey
+        // sessionKey format: "agent:main:main" — extract agent ID
+        const agentId = extractAgentId(payload.sessionKey)
         const messageId = payload.runId ?? uid()
         const state = payload.state as string
+
+        // On final message: refresh tokens + check for tool calls
+        if (state === "final") {
+          fetchInitialData()
+
+          // Extract text and check for media tool calls
+          const finalMsg = payload.message
+          let finalText = ""
+          if (finalMsg?.content && Array.isArray(finalMsg.content)) {
+            finalText = finalMsg.content
+              .filter((c: { type: string }) => c.type === "text")
+              .map((c: { text: string }) => c.text ?? "")
+              .join("")
+          }
+
+          const toolCalls = parseToolCalls(finalText)
+          if (toolCalls.length > 0 && agentId) {
+            // Execute tool calls locally and send results back
+            ;(async () => {
+              const results: string[] = []
+              for (const tc of toolCalls) {
+                const result = await executeMediaTool(tc.tool, tc.params)
+                results.push(`Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``)
+              }
+              const resultMessage = `[Tool Results]\n\n${results.join("\n\n")}`
+
+              // Add tool result as a system message in UI
+              set((s) => ({
+                messages: {
+                  ...s.messages,
+                  [agentId]: [
+                    ...(s.messages[agentId] ?? []),
+                    {
+                      id: uid(),
+                      agentId,
+                      role: "tool" as const,
+                      content: resultMessage,
+                      timestamp: Date.now(),
+                    },
+                  ],
+                },
+              }))
+
+              // Send result back to agent so it knows the outcome
+              if (wsClient) {
+                wsClient.request("chat.send", {
+                  sessionKey: agentId,
+                  message: resultMessage,
+                  idempotencyKey: uid(),
+                }).catch((e) => console.error("[Gateway] tool result send failed:", e))
+              }
+            })()
+          }
+        }
 
         if (state === "delta" || state === "final") {
           // Extract text from message.content array: [{ type: "text", text: "..." }]
@@ -396,7 +585,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       case "message.received":
       case "chat.message": {
         if (payload) {
-          const agentId = payload.sessionKey ?? payload.agentId ?? payload.from
+          const agentId = extractAgentId(payload.sessionKey) ?? payload.agentId ?? payload.from
           const msg: Message = {
             id: payload.id ?? uid(),
             agentId: agentId ?? "unknown",
@@ -418,7 +607,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       case "message.chunk":
       case "chat.chunk": {
         if (payload) {
-          const agentId = payload.sessionKey ?? payload.agentId
+          const agentId = extractAgentId(payload.sessionKey) ?? payload.agentId
           const messageId = payload.messageId ?? payload.id
           const delta = payload.content ?? payload.chunk ?? payload.delta ?? ""
           if (agentId && messageId) {
@@ -484,7 +673,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       // Agent status changes
       case "agent.status_changed": {
         if (payload) {
-          const agentId = payload.sessionKey ?? payload.agentId
+          const agentId = extractAgentId(payload.sessionKey) ?? payload.agentId
           const newStatus = mapSessionStatus(payload.status)
           set((s) => ({
             agents: s.agents.map((a) =>
@@ -542,12 +731,37 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       const agents = agentEntries.map(agentEntryToAgent)
       set({ agents })
 
-      // Fetch sessions for raw data (conversations, not agent list)
+      // Fetch sessions and aggregate token usage per agent
       try {
         const sessionsRes = await wsClient.request("sessions.list", {})
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sessions = (sessionsRes as any)?.sessions ?? (sessionsRes as any)?.items ?? []
         set({ sessions })
+
+        // Aggregate token usage from sessions into agents
+        // Session key format: "agent:{agentId}:{sender}"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tokensByAgent: Record<string, { input: number; output: number; total: number }> = {}
+        for (const s of sessions) {
+          const sk = s.key as string ?? ""
+          const senderId = extractAgentId(sk)
+          if (!tokensByAgent[senderId]) {
+            tokensByAgent[senderId] = { input: 0, output: 0, total: 0 }
+          }
+          tokensByAgent[senderId].input += s.inputTokens ?? 0
+          tokensByAgent[senderId].output += s.outputTokens ?? 0
+          tokensByAgent[senderId].total += s.totalTokens ?? 0
+        }
+
+        set((state) => ({
+          agents: state.agents.map((a) => {
+            const usage = tokensByAgent[a.id]
+            if (usage) {
+              return { ...a, tokensToday: usage.output, tokensTotal: usage.input }
+            }
+            return a
+          }),
+        }))
       } catch {
         // sessions might not be available
       }
@@ -593,7 +807,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       wsClient = new WsClient()
       wsClient.onMessage(handleGatewayFrame)
 
-      set({ url, apiKey, mockMode: false })
+      set({ url, apiKey, mockMode: false, messages: loadPersistedMessages() })
       persistConfig(url, apiKey, false)
       wsClient.connect(url, apiKey)
     },
@@ -651,13 +865,21 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
       // Translate our GatewayMessage types to OpenClaw RPC calls
       switch (msg.type) {
-        case "agent.message":
+        case "agent.message": {
+          // Prepend media tools prompt on first message to each agent
+          let messageContent = msg.content
+          if (!mediaPromptSent.has(msg.agentId)) {
+            messageContent = `[System: ${MEDIA_TOOLS_PROMPT}]\n\n${msg.content}`
+            mediaPromptSent.add(msg.agentId)
+          }
+
           wsClient.request("chat.send", {
-            key: msg.agentId,
-            message: msg.content,
+            sessionKey: msg.agentId,
+            message: messageContent,
             idempotencyKey: uid(),
           }).catch((e) => console.error("[Gateway] chat.send failed:", e))
           break
+        }
 
         case "agent.command":
           wsClient.request("sessions.send", {
@@ -740,5 +962,14 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         },
       }))
     },
+  }
+})
+
+// Persist messages on change (debounced)
+let _persistTimer: ReturnType<typeof setTimeout> | null = null
+useGatewayStore.subscribe((state, prev) => {
+  if (state.messages !== prev.messages) {
+    if (_persistTimer) clearTimeout(_persistTimer)
+    _persistTimer = setTimeout(() => persistMessages(state.messages), 500)
   }
 })

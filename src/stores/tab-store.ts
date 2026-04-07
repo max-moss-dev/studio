@@ -7,7 +7,7 @@ import type { Tab } from "@/lib/types"
 interface TabState {
   tabs: Tab[]
   activeTabId: string | null
-  openTab: (viewId: string, title: string, icon?: string) => string
+  openTab: (viewId: string, title: string, icon?: string, initialState?: Record<string, unknown>) => string
   closeTab: (id: string) => void
   setActiveTab: (id: string) => void
   updateTabState: (id: string, state: Record<string, unknown>) => void
@@ -28,9 +28,9 @@ export const useTabStore = create<TabState>()(
       ],
       activeTabId: "tab-agents-default",
 
-      openTab(viewId: string, title: string, icon?: string) {
+      openTab(viewId: string, title: string, icon?: string, initialState?: Record<string, unknown>) {
         const id = `tab-${Date.now()}-${++tabCounter}`
-        const newTab: Tab = { id, viewId, title, icon }
+        const newTab: Tab = { id, viewId, title, icon, state: initialState }
         set((s) => ({
           tabs: [...s.tabs, newTab],
           activeTabId: id,

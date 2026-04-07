@@ -36,6 +36,18 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
     type: "built-in",
   },
   {
+    id: "media",
+    title: "Media",
+    icon: "file-text",
+    type: "built-in",
+  },
+  {
+    id: "todo",
+    title: "Tasks",
+    icon: "check-circle",
+    type: "built-in",
+  },
+  {
     id: "settings",
     title: "Settings",
     icon: "settings",

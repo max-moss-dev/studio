@@ -24,10 +24,12 @@ import {
   Coins,
   ChevronRight,
   X,
+  MessageSquare,
 } from "lucide-react"
 import type { Agent, AgentStatus, AgentRole } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { uid } from "@/lib/mock-data"
+import { useTabStore } from "@/stores/tab-store"
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
   online: "bg-[#98c379]",
@@ -66,10 +68,13 @@ function formatTokens(n: number): string {
 
 type FilterStatus = "all" | AgentStatus
 
-export default function AgentManagerView({ agents, send, models }: ViewProps) {
+export default function AgentManagerView({ agents, send, models, initialAgentId }: ViewProps & { initialAgentId?: string }) {
+  const openTab = useTabStore((s) => s.openTab)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all")
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(
+    initialAgentId ? agents.find((a) => a.id === initialAgentId) ?? null : null
+  )
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [newAgentName, setNewAgentName] = useState("")
 
@@ -88,12 +93,22 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
     error: agents.filter((a) => a.status === "error").length,
   }
 
+  const [addError, setAddError] = useState("")
+
   function handleAddAgent() {
-    if (!newAgentName.trim()) return
+    const name = newAgentName.trim()
+    if (!name) return
+    if (name.toLowerCase() === "main") {
+      setAddError("\"main\" is reserved")
+      return
+    }
+    // Use ASCII-safe name for workspace path
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase() || "agent"
+    setAddError("")
     send({
       type: "agent.create",
       config: {
-        name: newAgentName.trim(),
+        name: safeName,
       },
     })
     setNewAgentName("")
@@ -152,7 +167,7 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
             ))}
           </div>
 
-          <Button size="sm" className="gap-1.5 ml-auto" onClick={() => setShowAddDialog(true)}>
+          <Button size="sm" className="gap-1.5 ml-auto" onClick={() => { setShowAddDialog(true); setAddError("") }}>
             <Plus className="h-4 w-4" />
             Add Agent
           </Button>
@@ -227,9 +242,14 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
         </ScrollArea>
       </div>
 
-      {/* Detail panel */}
+      {/* Detail panel — fills remaining space */}
+      {!selectedAgent && (
+        <div className="flex-1 border-l flex items-center justify-center">
+          <p className="text-muted-foreground text-sm">Select an agent to view details</p>
+        </div>
+      )}
       {selectedAgent && (
-        <div className="w-80 border-l flex flex-col">
+        <div className="flex-1 border-l flex flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h3 className="text-sm font-semibold">Agent Details</h3>
             <Button
@@ -265,7 +285,7 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
                 <Card>
                   <CardHeader className="p-3 pb-1">
                     <CardTitle className="text-xs text-muted-foreground">
-                      Tokens Today
+                      Output Tokens
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-3 pt-0">
@@ -277,7 +297,7 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
                 <Card>
                   <CardHeader className="p-3 pb-1">
                     <CardTitle className="text-xs text-muted-foreground">
-                      Total Tokens
+                      Input Tokens
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-3 pt-0">
@@ -348,6 +368,15 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
                   variant="outline"
                   size="sm"
                   className="flex-1 gap-1.5"
+                  onClick={() => openTab("chats", `Chat: ${selectedAgent.name}`, "message-square", { agentId: selectedAgent.id })}
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  Chat
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-1.5"
                   onClick={() => handleRestart(selectedAgent.id)}
                 >
                   <RotateCw className="h-3.5 w-3.5" />
@@ -382,12 +411,15 @@ export default function AgentManagerView({ agents, send, models }: ViewProps) {
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Name</label>
               <Input
-                placeholder="e.g. CodeAssistant"
+                placeholder="e.g. code-assistant (ASCII only)"
                 value={newAgentName}
-                onChange={(e) => setNewAgentName(e.target.value)}
+                onChange={(e) => { setNewAgentName(e.target.value); setAddError("") }}
               />
+              {addError && (
+                <p className="text-xs text-destructive">{addError}</p>
+              )}
               <p className="text-xs text-muted-foreground">
-                Model and other settings can be configured after creation.
+                Name will be converted to lowercase ASCII. Model and other settings can be configured after creation.
               </p>
             </div>
             <Button onClick={handleAddAgent} disabled={!newAgentName.trim()} className="mt-2">
