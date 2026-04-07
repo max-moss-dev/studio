@@ -17,7 +17,8 @@ export type {
 } from "./types"
 
 // Gateway store
-export { useGatewayStore, loadPersistedConfig } from "./gateway-store"
+export type { ConnectionError } from "./gateway-store"
+export { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "./gateway-store"
 
 // WebSocket client
 export { WsClient } from "./ws-client"

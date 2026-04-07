@@ -53,6 +53,9 @@ Tasks (shared todo list):
 - todo.list: List all tasks
 - todo.complete: Mark a task done (params: id)
 
+Views (UI components — React+JSX, self-contained, no imports):
+- view.update: Update an AI-generated view's code (params: viewId, code). The code must be a valid React component with export default. Only React hooks (useState, useEffect, useMemo, useCallback, useRef) are available. Props: { agents, events, tasks, messages, models, send }.
+
 Tips:
 - Use GFM markdown: tables, task lists (- [ ] / - [x]), code blocks, blockquotes
 - Organize media into folders: notes/, research/, tasks/, summaries/
@@ -87,10 +90,44 @@ function parseToolCalls(text: string): Array<{ tool: string; params: Record<stri
   return results
 }
 
+// View store accessor — set lazily to avoid circular imports
+let _viewStoreRegister: ((view: Record<string, unknown>) => void) | null = null
+let _viewStoreGet: ((id: string) => Record<string, unknown> | undefined) | null = null
+
+export function setViewStoreAccessors(
+  register: (view: Record<string, unknown>) => void,
+  getView: (id: string) => Record<string, unknown> | undefined
+) {
+  _viewStoreRegister = register
+  _viewStoreGet = getView
+}
+
 /**
- * Execute a media tool call locally and return the result.
+ * Execute a tool call locally and return the result.
  */
 async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+  // Handle view.update — write file to disk + update store
+  if (tool === "view.update") {
+    const viewId = params.viewId as string
+    const code = params.code as string
+    if (!viewId || !code) return { error: "viewId and code required" }
+    if (!_viewStoreGet) return { error: "View store not available" }
+    const existing = _viewStoreGet(viewId)
+    if (existing?.type === "built-in") return { error: "Cannot edit built-in views. Clone it first." }
+
+    // Write to disk
+    const writeRes = await fetch("/api/views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: viewId, code }),
+    })
+    if (!writeRes.ok) {
+      const err = await writeRes.json()
+      return { error: err.error ?? "Failed to write view" }
+    }
+    return { ok: true, viewId, message: "View updated. Reload the tab to see changes." }
+  }
+
   try {
     const res = await fetch("/api/media/mcp", {
       method: "POST",
@@ -105,12 +142,19 @@ async function executeMediaTool(tool: string, params: Record<string, unknown>): 
 
 const MAX_EVENTS = 1000
 
+export interface ConnectionError {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
 interface GatewayState {
   // Connection
   url: string
   apiKey: string
   connected: boolean
   mockMode: boolean
+  connectionError: ConnectionError | null
 
   // Data
   agents: Agent[]
@@ -126,6 +170,7 @@ interface GatewayState {
   connectGateway: (url: string, apiKey: string) => void
   connectMock: () => void
   disconnect: () => void
+  clearError: () => void
   send: (msg: GatewayMessage) => void
   sendToGateway: (method: string, params?: Record<string, unknown>) => Promise<unknown>
   addMessage: (agentId: string, message: Message) => void
@@ -381,9 +426,13 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
     // Internal signals from WsClient
     if (frame.type === "_connected") {
-      set({ connected: true })
+      set({ connected: true, connectionError: null })
       // Fetch initial data after handshake
       fetchInitialData()
+      return
+    }
+    if (frame.type === "_error") {
+      set({ connectionError: frame.error ?? { code: "UNKNOWN", message: "Connection error" } })
       return
     }
     if (frame.type === "_disconnected") {
@@ -784,6 +833,18 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       // no need to poll — the gateway pushes updates.
     } catch (err) {
       console.error("[Gateway] Failed to fetch initial data:", err)
+      const errObj = err as Record<string, unknown> | undefined
+      const code = errObj?.code as string | undefined
+      const details = errObj?.details as Record<string, unknown> | undefined
+      if (code || details?.code) {
+        set({
+          connectionError: {
+            code: code ?? (details?.code as string) ?? "FETCH_FAILED",
+            message: (errObj?.message as string) ?? "Failed to fetch data from gateway",
+            details: details,
+          },
+        })
+      }
     }
   }
 
@@ -792,6 +853,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     apiKey: "",
     connected: false,
     mockMode: false,
+    connectionError: null,
     agents: [],
     events: [],
     tasks: [],
@@ -800,6 +862,10 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     presence: {},
     models: [] as string[],
 
+    clearError() {
+      set({ connectionError: null })
+    },
+
     connectGateway(url: string, apiKey: string) {
       // Clean up existing connections
       get().disconnect()
@@ -807,7 +873,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       wsClient = new WsClient()
       wsClient.onMessage(handleGatewayFrame)
 
-      set({ url, apiKey, mockMode: false, messages: loadPersistedMessages() })
+      set({ url, apiKey, mockMode: false, connectionError: null, messages: loadPersistedMessages() })
       persistConfig(url, apiKey, false)
       wsClient.connect(url, apiKey)
     },
@@ -841,6 +907,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       }
       set({
         connected: false,
+        connectionError: null,
         agents: [],
         events: [],
         tasks: [],

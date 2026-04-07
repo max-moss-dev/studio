@@ -21,6 +21,10 @@ import {
   Puzzle,
   Settings,
   LayoutGrid,
+  Copy,
+  FileText,
+  CheckCircle,
+  Code,
 } from "lucide-react"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { uid } from "@/lib/mock-data"
@@ -35,6 +39,9 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   link: Link,
   settings: Settings,
   "layout-grid": LayoutGrid,
+  "file-text": FileText,
+  "check-circle": CheckCircle,
+  code: Code,
 }
 
 // Views that shouldn't appear in the picker
@@ -65,9 +72,62 @@ export default function ViewPickerView() {
   const aiViews = views.filter((v) => v.type === "ai-generated")
   const plugins = views.filter((v) => v.type === "plugin")
 
+  const [cloning, setCloning] = useState<string | null>(null)
+
   function handleOpenView(viewId: string, title: string, icon?: string) {
     openTab(viewId, title, icon)
     // Close the view-picker tab
+    if (activeTabId) closeTab(activeTabId)
+  }
+
+  async function handleCloneView(viewId: string, title: string, icon?: string) {
+    setCloning(viewId)
+    try {
+      // Fetch source code of built-in view
+      const res = await fetch(`/api/views?id=${encodeURIComponent(viewId)}`)
+      const data = await res.json()
+      if (!data.code) {
+        console.error("Failed to fetch view source")
+        setCloning(null)
+        return
+      }
+
+      // Generate a clean clone ID
+      const cloneId = `${viewId}-copy-${Date.now().toString(36)}`
+
+      // Write the file to disk via API
+      const writeRes = await fetch("/api/views", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cloneId, code: data.code }),
+      })
+
+      if (!writeRes.ok) {
+        const err = await writeRes.json()
+        console.error("Failed to write view:", err)
+        setCloning(null)
+        return
+      }
+
+      // Register in view store
+      registerView({
+        id: cloneId,
+        title: `${title} (Copy)`,
+        icon: icon ?? "sparkles",
+        type: "ai-generated",
+        createdAt: Date.now(),
+      })
+
+      openTab(cloneId, `${title} (Copy)`, icon)
+      if (activeTabId) closeTab(activeTabId)
+    } catch (err) {
+      console.error("Clone failed:", err)
+    }
+    setCloning(null)
+  }
+
+  function handleEditCode(viewId: string) {
+    openTab("code-editor", "Edit View", "code", { viewId })
     if (activeTabId) closeTab(activeTabId)
   }
 
@@ -138,14 +198,29 @@ export default function ViewPickerView() {
             {builtInViews.map((view) => {
               const Icon = ICON_MAP[view.icon] ?? Sparkles
               return (
-                <button
+                <div
                   key={view.id}
-                  onClick={() => handleOpenView(view.id, view.title, view.icon)}
-                  className="flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent cursor-pointer"
+                  className="group flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent"
                 >
-                  <Icon className="h-5 w-5 text-primary" />
-                  <span className="text-sm font-medium">{view.title}</span>
-                </button>
+                  <button
+                    onClick={() => handleOpenView(view.id, view.title, view.icon)}
+                    className="flex items-center gap-3 flex-1 cursor-pointer"
+                  >
+                    <Icon className="h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">{view.title}</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCloneView(view.id, view.title, view.icon) }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity cursor-pointer"
+                    title="Clone as editable copy"
+                  >
+                    {cloning === view.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
               )
             })}
           </div>
@@ -279,6 +354,15 @@ export default function ViewPickerView() {
                     <span className="text-sm">{view.title}</span>
                   </button>
                   <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Edit code"
+                      onClick={() => handleEditCode(view.id)}
+                    >
+                      <Code className="h-3.5 w-3.5" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"

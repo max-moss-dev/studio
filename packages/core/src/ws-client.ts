@@ -321,6 +321,18 @@ export class WsClient {
         }
         this._connected = false
         this._authenticated = false
+        // Surface the error with structured info for the UI
+        const errorCode = (err as Record<string, unknown>)?.code as string | undefined
+        const errorMessage = (err as Record<string, unknown>)?.message as string | undefined
+        const details = (err as Record<string, unknown>)?.details as Record<string, unknown> | undefined
+        this.notify({
+          type: "_error",
+          error: {
+            code: errorCode ?? details?.code ?? "CONNECTION_FAILED",
+            message: errorMessage ?? "Connection rejected",
+            details,
+          },
+        })
         this.notify({ type: "_disconnected" })
       },
       timer,

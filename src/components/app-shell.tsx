@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useMemo, lazy, Suspense } from "react"
+import { useState, useEffect, lazy, Suspense } from "react"
 import { Header } from "./header"
 import { ConnectionDialog } from "./connection-dialog"
+import { Button } from "@/components/ui/button"
 import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
-import { useGatewayStore, loadPersistedConfig } from "@/stores/gateway-store"
+import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/stores/gateway-store"
 import { useGateway } from "@/hooks/use-gateway"
-import { compileView } from "@/lib/ai-compiler"
 import { Loader2, AlertTriangle, Radio } from "lucide-react"
 
 // Lazy load built-in views
@@ -19,6 +19,7 @@ const SettingsView = lazy(() => import("@/views/settings"))
 const ViewPickerView = lazy(() => import("@/views/view-picker"))
 const MediaView = lazy(() => import("@/views/media"))
 const TodoView = lazy(() => import("@/views/todo"))
+const CodeEditorView = lazy(() => import("@/views/code-editor"))
 
 function ViewFallback() {
   return (
@@ -39,32 +40,56 @@ function ViewError({ message }: { message: string }) {
 }
 
 /**
- * Renders a plugin or AI-generated view by compiling its source code at runtime.
+ * Renders a custom view by dynamically importing it from src/views/.
+ * Uses real file imports — supports full Next.js hot reload.
  */
 function DynamicView({ viewId, viewProps }: { viewId: string; viewProps: Record<string, unknown> }) {
-  const view = useViewStore((s) => s.getView(viewId))
+  const [Component, setComponent] = useState<React.ComponentType<Record<string, unknown>> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [key, setKey] = useState(0)
 
-  const compiled = useMemo(() => {
-    if (!view?.code) return { Component: null, error: "No source code found for this view." }
-    try {
-      const Component = compileView(view.code)
-      if (!Component) return { Component: null, error: "Compilation returned no component." }
-      return { Component, error: null }
-    } catch (err) {
-      return { Component: null, error: err instanceof Error ? err.message : String(err) }
-    }
-  }, [view?.code])
+  useEffect(() => {
+    setError(null)
+    setComponent(null)
 
-  if (compiled.error) return <ViewError message={compiled.error} />
-  if (!compiled.Component) return <ViewFallback />
+    // Strip prefixes like "custom-" if present
+    const cleanId = viewId.replace(/^(custom-|ai-|plugin-)/, "")
 
-  const Component = compiled.Component
+    // Dynamic import from src/views/{id}
+    import(`@/views/${cleanId}/index.tsx`)
+      .then((mod) => {
+        const Comp = mod.default ?? mod.View ?? mod.Component
+        if (Comp) {
+          setComponent(() => Comp)
+        } else {
+          setError("View module has no default export")
+        }
+      })
+      .catch((err) => {
+        setError(`Failed to load view "${cleanId}": ${err.message}`)
+      })
+  }, [viewId, key])
+
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+        <AlertTriangle className="h-8 w-8" />
+        <p className="text-sm max-w-md text-center">{error}</p>
+        <Button variant="outline" size="sm" onClick={() => setKey((k) => k + 1)}>
+          Retry
+        </Button>
+      </div>
+    )
+  }
+  if (!Component) return <ViewFallback />
+
   return <Component {...viewProps} />
 }
 
 function ActiveView() {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const tabs = useTabStore((s) => s.tabs)
+  const openTab = useTabStore((s) => s.openTab)
   const { agents, events, tasks, messages, send, models } = useGateway()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
@@ -98,15 +123,90 @@ function ActiveView() {
   if (activeTab.viewId === "todo") {
     return <Suspense fallback={<ViewFallback />}><TodoView /></Suspense>
   }
-
-  // Plugin or AI-generated views — compile and render at runtime
-  if (activeTab.viewId.startsWith("plugin-") || activeTab.viewId.startsWith("ai-")) {
-    return <DynamicView viewId={activeTab.viewId} viewProps={viewProps} />
+  if (activeTab.viewId === "code-editor") {
+    return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
   }
 
+  // Custom/cloned views — dynamic import from src/views/{id}/
   return (
-    <div className="flex h-full items-center justify-center text-muted-foreground">
-      Unknown view: {activeTab.viewId}
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b px-3 py-1.5 bg-muted/30 shrink-0">
+        <span className="text-xs text-muted-foreground flex-1">Custom View: {activeTab.title}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-1 text-xs text-muted-foreground"
+          onClick={() => openTab("code-editor", `Edit: ${activeTab.title}`, "code", { viewId: activeTab.viewId })}
+        >
+          <Radio className="h-3 w-3" />
+          Edit Code
+        </Button>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <DynamicView viewId={activeTab.viewId} viewProps={viewProps} />
+      </div>
+    </div>
+  )
+}
+
+function errorLabel(code: string): string {
+  switch (code) {
+    case "NOT_PAIRED":
+    case "PAIRING_REQUIRED":
+      return "Pairing required \u2014 approve this device on the gateway"
+    case "AUTH_FAILED":
+    case "UNAUTHORIZED":
+      return "Authentication failed \u2014 check your API key"
+    case "CONNECTION_FAILED":
+      return "Could not connect to gateway"
+    case "FETCH_FAILED":
+      return "Connected but failed to load data"
+    default:
+      return code.replace(/_/g, " ").toLowerCase()
+  }
+}
+
+function ConnectionErrorBanner() {
+  const error = useGatewayStore((s) => s.connectionError)
+  const clearError = useGatewayStore((s) => s.clearError)
+  const connectGateway = useGatewayStore((s) => s.connectGateway)
+  const url = useGatewayStore((s) => s.url)
+  const apiKey = useGatewayStore((s) => s.apiKey)
+
+  if (!error) return null
+
+  const isPairing = error.code === "NOT_PAIRED" || error.code === "PAIRING_REQUIRED"
+
+  return (
+    <div className="flex items-center gap-3 border-b px-4 py-2 bg-[#e06c75]/10 border-[#e06c75]/20 shrink-0">
+      <AlertTriangle className="h-4 w-4 text-[#e06c75] shrink-0" />
+      <span className="text-xs text-[#e06c75] font-medium flex-1">
+        {errorLabel(error.code)}
+        {error.message && error.code !== error.message && (
+          <span className="text-[#e06c75]/70 ml-2">\u2014 {error.message}</span>
+        )}
+      </span>
+      <div className="flex items-center gap-2">
+        {isPairing && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-[10px] border-[#e06c75]/30 text-[#e06c75] hover:bg-[#e06c75]/10"
+            onClick={() => {
+              clearError()
+              connectGateway(url, apiKey)
+            }}
+          >
+            Retry
+          </Button>
+        )}
+        <button
+          className="text-[#e06c75]/50 hover:text-[#e06c75] text-xs leading-none px-1"
+          onClick={clearError}
+        >
+          &#x2715;
+        </button>
+      </div>
     </div>
   )
 }
@@ -114,17 +214,28 @@ function ActiveView() {
 function Footer() {
   const connected = useGatewayStore((s) => s.connected)
   const mockMode = useGatewayStore((s) => s.mockMode)
+  const error = useGatewayStore((s) => s.connectionError)
+
+  const statusColor = error
+    ? "text-[#e06c75]"
+    : connected
+      ? "text-[#98c379]"
+      : "text-muted-foreground"
+
+  const statusText = error
+    ? error.code.replace(/_/g, " ").toLowerCase()
+    : connected
+      ? mockMode
+        ? "mock://localhost"
+        : "ws://localhost:18789"
+      : "disconnected"
 
   return (
     <footer className="flex h-7 items-center justify-between border-t bg-header-bg px-4 shrink-0">
       <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
-        <Radio className={`h-2.5 w-2.5 ${connected ? "text-[#98c379]" : "text-muted-foreground"}`} />
-        <span>
-          {connected
-            ? mockMode
-              ? "mock://localhost"
-              : "ws://localhost:18789"
-            : "disconnected"}
+        <Radio className={`h-2.5 w-2.5 ${statusColor}`} />
+        <span className={error ? "text-[#e06c75]" : undefined}>
+          {statusText}
         </span>
         <span className="text-border">|</span>
         <span>{connected ? "12ms" : "--"}</span>
@@ -143,7 +254,17 @@ export function AppShell() {
   const openTab = useTabStore((s) => s.openTab)
   const tabs = useTabStore((s) => s.tabs)
   const setActiveTab = useTabStore((s) => s.setActiveTab)
+  const registerView = useViewStore((s) => s.registerView)
+  const getView = useViewStore((s) => s.getView)
   const [showInitialConnection, setShowInitialConnection] = useState(false)
+
+  // Wire up view store accessors for the gateway tool proxy
+  useEffect(() => {
+    setViewStoreAccessors(
+      (view) => registerView(view as import("@/lib/types").ViewDefinition),
+      (id) => getView(id) as Record<string, unknown> | undefined
+    )
+  }, [registerView, getView])
 
   // Auto-connect on mount from persisted config
   useEffect(() => {
@@ -169,6 +290,7 @@ export function AppShell() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header />
+      <ConnectionErrorBanner />
       <main className="flex-1 overflow-hidden">
         <ActiveView />
       </main>

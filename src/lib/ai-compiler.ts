@@ -10,18 +10,35 @@ import React from "react"
  *   - `export default Foo`
  *   - Named function/const `View`, `Component`, `App`, or the first function found
  */
+/**
+ * Strip import/export statements and "use client" directives.
+ * Converts: import { X } from "y" → (removed, X provided as global)
+ * Converts: export default function → function (captured via exports)
+ */
+function stripImports(source: string): string {
+  return source
+    // Remove "use client" / "use server"
+    .replace(/^\s*["']use (client|server)["']\s*;?\s*$/gm, "")
+    // Remove import statements (single and multi-line)
+    .replace(/^import\s+[\s\S]*?from\s+["'][^"']*["']\s*;?\s*$/gm, "")
+    .replace(/^import\s+["'][^"']*["']\s*;?\s*$/gm, "")
+    // Remove import type statements
+    .replace(/^import\s+type\s+[\s\S]*?from\s+["'][^"']*["']\s*;?\s*$/gm, "")
+}
+
 export function compileView(jsxSource: string): React.ComponentType<Record<string, unknown>> | null {
   try {
+    // Strip imports before compilation
+    const cleanSource = stripImports(jsxSource)
+
     // Transform JSX + TypeScript to plain JS
-    const { code } = transform(jsxSource, {
+    const { code } = transform(cleanSource, {
       transforms: ["jsx", "typescript"],
       jsxRuntime: "classic",
       production: true,
     })
 
-    // Wrap in a module-style factory:
-    // - We provide a `exports` object to capture `export default`
-    // - Sucrase turns `export default X` into `exports.default = X`
+    // Wrap in a module-style factory
     const wrappedCode = `
       var exports = {};
       ${code}
@@ -52,8 +69,13 @@ export function compileView(jsxSource: string): React.ComponentType<Record<strin
       "useMemo",
       "useCallback",
       "useRef",
+      "cn",
       wrappedCode
     )
+
+    // Provide a basic cn() utility
+    const cn = (...args: unknown[]) =>
+      args.filter(Boolean).join(" ")
 
     const component = factory(
       React,
@@ -62,6 +84,7 @@ export function compileView(jsxSource: string): React.ComponentType<Record<strin
       React.useMemo,
       React.useCallback,
       React.useRef,
+      cn,
     )
 
     return component
