@@ -62,7 +62,7 @@ export default function SettingsView() {
                       : currentUrl}
                   </div>
                 </div>
-                <span className="h-2.5 w-2.5 rounded-full bg-[#98c379]" />
+                <span className="h-2.5 w-2.5 rounded-full bg-status-online" />
               </div>
             </div>
 

@@ -75,7 +75,7 @@ export function MarkdownRenderer({
             onChange={() => {
               if (lineIdx !== undefined) handleCheckboxToggle(lineIdx)
             }}
-            className="mr-2 cursor-pointer accent-[#98c379] h-4 w-4 align-middle"
+            className="mr-2 cursor-pointer accent-status-online h-4 w-4 align-middle"
           />
         )
       }
@@ -88,7 +88,7 @@ export function MarkdownRenderer({
       if (isInline) {
         return (
           <code
-            className="rounded bg-[#2c313a] px-1.5 py-0.5 text-[13px] font-mono text-[#e5c07b]"
+            className="rounded bg-surface px-1.5 py-0.5 text-[13px] font-mono text-status-busy"
             {...rest}
           >
             {children}
@@ -97,7 +97,7 @@ export function MarkdownRenderer({
       }
       return (
         <code
-          className={`block rounded-md bg-[#2c313a] p-3 text-[13px] font-mono overflow-x-auto ${codeClass ?? ""}`}
+          className={`block rounded-md bg-surface p-3 text-[13px] font-mono overflow-x-auto ${codeClass ?? ""}`}
           {...rest}
         >
           {children}
@@ -106,7 +106,7 @@ export function MarkdownRenderer({
     },
 
     pre: ({ children }) => (
-      <pre className="rounded-md bg-[#2c313a] border border-[#3e4451] overflow-x-auto my-2">
+      <pre className="rounded-md bg-surface border border-border overflow-x-auto my-2">
         {children}
       </pre>
     ),
@@ -117,7 +117,7 @@ export function MarkdownRenderer({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[#61afef] underline hover:text-[#61afef]/80"
+        className="text-[var(--color-accent)] underline hover:text-[var(--color-accent)]/80"
       >
         {children}
       </a>
@@ -130,23 +130,23 @@ export function MarkdownRenderer({
       </div>
     ),
     th: ({ children }) => (
-      <th className="border border-[#3e4451] bg-[#2c313a] px-3 py-1.5 text-left font-medium">
+      <th className="border border-border bg-surface px-3 py-1.5 text-left font-medium">
         {children}
       </th>
     ),
     td: ({ children }) => (
-      <td className="border border-[#3e4451] px-3 py-1.5">{children}</td>
+      <td className="border border-border px-3 py-1.5">{children}</td>
     ),
 
     // Headings
     h1: ({ children }) => (
-      <h1 className="text-xl font-bold mt-4 mb-2 text-[#d7dae0]">{children}</h1>
+      <h1 className="text-xl font-bold mt-4 mb-2 text-text-bright">{children}</h1>
     ),
     h2: ({ children }) => (
-      <h2 className="text-lg font-semibold mt-3 mb-1.5 text-[#d7dae0]">{children}</h2>
+      <h2 className="text-lg font-semibold mt-3 mb-1.5 text-text-bright">{children}</h2>
     ),
     h3: ({ children }) => (
-      <h3 className="text-base font-semibold mt-2 mb-1 text-[#d7dae0]">{children}</h3>
+      <h3 className="text-base font-semibold mt-2 mb-1 text-text-bright">{children}</h3>
     ),
 
     // Lists
@@ -168,7 +168,7 @@ export function MarkdownRenderer({
 
     // Blockquotes
     blockquote: ({ children }) => (
-      <blockquote className="border-l-2 border-[#61afef] pl-3 my-2 text-[#abb2bf] italic">
+      <blockquote className="border-l-2 border-[var(--color-accent)] pl-3 my-2 text-text-primary italic">
         {children}
       </blockquote>
     ),
@@ -177,7 +177,7 @@ export function MarkdownRenderer({
     p: ({ children }) => <p className="my-1">{children}</p>,
 
     // Horizontal rules
-    hr: () => <hr className="border-[#3e4451] my-3" />,
+    hr: () => <hr className="border-border my-3" />,
 
     // Images
     img: ({ src, alt }) => (
@@ -191,7 +191,7 @@ export function MarkdownRenderer({
   }
 
   return (
-    <div className={`prose prose-invert max-w-none text-sm text-[#abb2bf] ${className ?? ""}`}>
+    <div className={`prose prose-invert max-w-none text-sm text-text-primary ${className ?? ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={components}

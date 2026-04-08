@@ -30,6 +30,36 @@
   --color-tab-border: var(--tab-border);
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* Design system tokens */
+  --color-bg-base: var(--color-bg-base);
+  --color-header: var(--color-header);
+  --color-header-muted: var(--color-header-muted);
+  --color-surface: var(--color-surface);
+  --color-surface-dark: var(--color-surface-dark);
+  --color-surface-error: var(--color-surface-error);
+  --color-footer: var(--color-footer);
+  --color-border-dark: var(--color-border-dark);
+  --color-border-error: var(--color-border-error);
+  --color-status-online: var(--color-status-online);
+  --color-status-online-muted: var(--color-status-online-muted);
+  --color-status-busy: var(--color-status-busy);
+  --color-status-busy-muted: var(--color-status-busy-muted);
+  --color-status-error: var(--color-status-error);
+  --color-status-error-muted: var(--color-status-error-muted);
+  --color-status-offline: var(--color-status-offline);
+  --color-role-orchestrator: var(--color-role-orchestrator);
+  --color-role-coder: var(--color-role-coder);
+  --color-role-reviewer: var(--color-role-reviewer);
+  --color-role-researcher: var(--color-role-researcher);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-bright: var(--color-text-bright);
+  --color-text-heading: var(--color-text-heading);
+  --color-text-orange: var(--color-text-orange);
+  --color-accent-muted: var(--color-accent-muted);
+  --color-accent-selected: var(--color-accent-selected);
+  --color-overlay-dark: var(--color-overlay-dark);
+  --color-canvas-base: var(--color-canvas-base);
 }
 
 :root {
@@ -55,6 +85,38 @@
   --ring: #61afef;
   --header-bg: #1e2127;
   --tab-border: #2e3239;
+  /* Design system tokens */
+  --color-bg-base: #282c34;
+  --color-header: #1e2127;
+  --color-header-muted: #1e212766;
+  --color-surface: #2c313a;
+  --color-surface-dark: #22262e;
+  --color-surface-error: #3e2828;
+  --color-footer: #21252b;
+  --color-border: #3e4451;
+  --color-border-dark: #2e3239;
+  --color-border-error: #5c3030;
+  --color-status-online: #98c379;
+  --color-status-online-muted: #98c37920;
+  --color-status-busy: #e5c07b;
+  --color-status-busy-muted: #e5c07b20;
+  --color-status-error: #e06c75;
+  --color-status-error-muted: #e06c7520;
+  --color-status-offline: #5c6370;
+  --color-role-orchestrator: #61afef;
+  --color-role-coder: #98c379;
+  --color-role-reviewer: #c678dd;
+  --color-role-researcher: #e5c07b;
+  --color-text-primary: #abb2bf;
+  --color-text-secondary: #5c6370;
+  --color-text-bright: #d7dae0;
+  --color-text-heading: #c8ccd4;
+  --color-text-orange: #d19a66;
+  --color-accent: #61afef;
+  --color-accent-muted: #61afef20;
+  --color-accent-selected: #528bff;
+  --color-overlay-dark: #1a1d2388;
+  --color-canvas-base: #0f0f11;
 }
 
 body {

@@ -178,12 +178,12 @@ function ConnectionErrorBanner() {
   const isPairing = error.code === "NOT_PAIRED" || error.code === "PAIRING_REQUIRED"
 
   return (
-    <div className="flex items-center gap-3 border-b px-4 py-2 bg-[#e06c75]/10 border-[#e06c75]/20 shrink-0">
-      <AlertTriangle className="h-4 w-4 text-[#e06c75] shrink-0" />
-      <span className="text-xs text-[#e06c75] font-medium flex-1">
+    <div className="flex items-center gap-3 border-b px-4 py-2 bg-status-error-muted border-status-error/20 shrink-0">
+      <AlertTriangle className="h-4 w-4 text-status-error shrink-0" />
+      <span className="text-xs text-status-error font-medium flex-1">
         {errorLabel(error.code)}
         {error.message && error.code !== error.message && (
-          <span className="text-[#e06c75]/70 ml-2">\u2014 {error.message}</span>
+          <span className="text-status-error/70 ml-2">\u2014 {error.message}</span>
         )}
       </span>
       <div className="flex items-center gap-2">
@@ -191,7 +191,7 @@ function ConnectionErrorBanner() {
           <Button
             variant="outline"
             size="sm"
-            className="h-6 text-[10px] border-[#e06c75]/30 text-[#e06c75] hover:bg-[#e06c75]/10"
+            className="h-6 text-[10px] border-status-error/30 text-status-error hover:bg-status-error/10"
             onClick={() => {
               clearError()
               connectGateway(url, apiKey)
@@ -201,7 +201,7 @@ function ConnectionErrorBanner() {
           </Button>
         )}
         <button
-          className="text-[#e06c75]/50 hover:text-[#e06c75] text-xs leading-none px-1"
+          className="text-status-error/50 hover:text-status-error text-xs leading-none px-1"
           onClick={clearError}
         >
           &#x2715;
@@ -217,9 +217,9 @@ function Footer() {
   const error = useGatewayStore((s) => s.connectionError)
 
   const statusColor = error
-    ? "text-[#e06c75]"
+    ? "text-status-error"
     : connected
-      ? "text-[#98c379]"
+      ? "text-status-online"
       : "text-muted-foreground"
 
   const statusText = error
@@ -234,7 +234,7 @@ function Footer() {
     <footer className="flex h-7 items-center justify-between border-t bg-header-bg px-4 shrink-0">
       <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
         <Radio className={`h-2.5 w-2.5 ${statusColor}`} />
-        <span className={error ? "text-[#e06c75]" : undefined}>
+        <span className={error ? "text-status-error" : undefined}>
           {statusText}
         </span>
         <span className="text-border">|</span>

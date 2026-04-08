@@ -23,10 +23,10 @@ import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
 
 const STATUS_DOT: Record<string, string> = {
-  online: "bg-[#98c379]",
-  busy: "bg-[#e5c07b]",
-  offline: "bg-[#5c6370]",
-  error: "bg-[#e06c75]",
+  online: "bg-status-online",
+  busy: "bg-status-busy",
+  offline: "bg-status-offline",
+  error: "bg-status-error",
 }
 
 function formatTime(ts: number): string {

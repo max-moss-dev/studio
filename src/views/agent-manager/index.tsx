@@ -32,10 +32,10 @@ import { uid } from "@/lib/mock-data"
 import { useTabStore } from "@/stores/tab-store"
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
-  online: "bg-[#98c379]",
-  busy: "bg-[#e5c07b]",
-  offline: "bg-[#5c6370]",
-  error: "bg-[#e06c75]",
+  online: "bg-status-online",
+  busy: "bg-status-busy",
+  offline: "bg-status-offline",
+  error: "bg-status-error",
 }
 
 const STATUS_LABELS: Record<AgentStatus, string> = {
@@ -46,11 +46,11 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
 }
 
 const ROLE_COLORS: Record<AgentRole, string> = {
-  orchestrator: "text-[#61afef] bg-[#61afef]/10",
-  coder: "text-[#98c379] bg-[#98c379]/10",
-  reviewer: "text-[#c678dd] bg-[#c678dd]/10",
-  researcher: "text-[#e5c07b] bg-[#e5c07b]/10",
-  custom: "text-[#5c6370] bg-[#5c6370]/10",
+  orchestrator: "text-role-orchestrator bg-role-orchestrator/10",
+  coder: "text-role-coder bg-role-coder/10",
+  reviewer: "text-role-reviewer bg-role-reviewer/10",
+  researcher: "text-role-researcher bg-role-researcher/10",
+  custom: "text-text-secondary bg-text-secondary/10",
 }
 
 function formatUptime(seconds: number): string {

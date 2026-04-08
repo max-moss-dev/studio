@@ -38,12 +38,12 @@ function generateId(): string {
 // --- Category colors ---
 
 const CATEGORY_COLORS: Record<string, string> = {
-  general: "#abb2bf",
-  bug: "#e06c75",
-  feature: "#98c379",
-  research: "#61afef",
-  urgent: "#e5c07b",
-  idea: "#c678dd",
+  general: "var(--color-text-primary)",
+  bug: "var(--color-status-error)",
+  feature: "var(--color-status-online)",
+  research: "var(--color-accent)",
+  urgent: "var(--color-status-busy)",
+  idea: "var(--color-role-reviewer)",
 }
 
 const CATEGORIES = Object.keys(CATEGORY_COLORS)
@@ -153,14 +153,14 @@ export default function TodoView() {
   const doneCount = todos.filter((t) => t.done).length
 
   return (
-    <div className="flex h-full flex-col" style={{ background: "#282c34" }}>
+    <div className="flex h-full flex-col" style={{ background: "var(--color-bg-base)" }}>
       {/* Header */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <div className="flex-1">
-          <h2 className="text-base font-semibold" style={{ color: "#d7dae0" }}>
+          <h2 className="text-base font-semibold" style={{ color: "var(--color-text-bright)" }}>
             Tasks
           </h2>
-          <p className="text-xs" style={{ color: "#5c6370" }}>
+          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
             {activeCount} active · {doneCount} done · synced to media base
           </p>
         </div>
@@ -177,13 +177,13 @@ export default function TodoView() {
           onChange={(e) => setNewText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addTodo()}
           className="flex-1 h-8 text-sm"
-          style={{ background: "#2c313a", borderColor: "#3e4451", color: "#d7dae0" }}
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-text-bright)" }}
         />
         <select
           value={newCategory}
           onChange={(e) => setNewCategory(e.target.value)}
           className="h-8 rounded-md border px-2 text-xs"
-          style={{ background: "#2c313a", borderColor: "#3e4451", color: "#d7dae0" }}
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-text-bright)" }}
         >
           {CATEGORIES.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
@@ -204,22 +204,22 @@ export default function TodoView() {
               onClick={() => setFilter(f)}
               className="rounded-full px-2.5 py-1 text-[11px] transition-colors cursor-pointer"
               style={{
-                background: filter === f ? "#3e4451" : "transparent",
-                color: filter === f ? "#d7dae0" : "#5c6370",
+                background: filter === f ? "var(--color-border)" : "transparent",
+                color: filter === f ? "var(--color-text-bright)" : "var(--color-text-secondary)",
               }}
             >
               {f === "all" ? `All ${todos.length}` : f === "active" ? `Active ${activeCount}` : `Done ${doneCount}`}
             </button>
           ))}
         </div>
-        <div className="h-4 w-px bg-[#3e4451]" />
+        <div className="h-4 w-px bg-border" />
         <div className="flex gap-1">
           <button
             onClick={() => setCategoryFilter(null)}
             className="rounded-full px-2 py-1 text-[11px] transition-colors cursor-pointer"
             style={{
-              background: categoryFilter === null ? "#3e4451" : "transparent",
-              color: categoryFilter === null ? "#d7dae0" : "#5c6370",
+              background: categoryFilter === null ? "var(--color-border)" : "transparent",
+              color: categoryFilter === null ? "var(--color-text-bright)" : "var(--color-text-secondary)",
             }}
           >
             All
@@ -233,8 +233,8 @@ export default function TodoView() {
                 onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
                 className="flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors cursor-pointer"
                 style={{
-                  background: categoryFilter === cat ? "#3e4451" : "transparent",
-                  color: categoryFilter === cat ? "#d7dae0" : "#5c6370",
+                  background: categoryFilter === cat ? "var(--color-border)" : "transparent",
+                  color: categoryFilter === cat ? "var(--color-text-bright)" : "var(--color-text-secondary)",
                 }}
               >
                 <span
@@ -252,7 +252,7 @@ export default function TodoView() {
             <button
               onClick={clearDone}
               className="text-[11px] cursor-pointer hover:underline"
-              style={{ color: "#5c6370" }}
+              style={{ color: "var(--color-text-secondary)" }}
             >
               Clear done
             </button>
@@ -263,11 +263,11 @@ export default function TodoView() {
       {/* Task list */}
       <ScrollArea className="flex-1">
         {loading && todos.length === 0 ? (
-          <div className="p-8 text-center text-sm" style={{ color: "#5c6370" }}>
+          <div className="p-8 text-center text-sm" style={{ color: "var(--color-text-secondary)" }}>
             Loading...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center" style={{ color: "#5c6370" }}>
+          <div className="p-8 text-center" style={{ color: "var(--color-text-secondary)" }}>
             <Check className="h-8 w-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">
               {todos.length === 0
@@ -280,7 +280,7 @@ export default function TodoView() {
             {filtered.map((todo) => (
               <div
                 key={todo.id}
-                className="group flex items-start gap-3 px-4 py-2.5 border-b border-[#2c313a] hover:bg-[#2c313a]/50 transition-colors"
+                className="group flex items-start gap-3 px-4 py-2.5 border-b border-surface hover:bg-surface/50 transition-colors"
               >
                 {/* Checkbox */}
                 <button
@@ -288,9 +288,9 @@ export default function TodoView() {
                   className="mt-0.5 shrink-0 cursor-pointer"
                 >
                   {todo.done ? (
-                    <CheckCircle2 className="h-5 w-5" style={{ color: "#98c379" }} />
+                    <CheckCircle2 className="h-5 w-5" style={{ color: "var(--color-status-online)" }} />
                   ) : (
-                    <Circle className="h-5 w-5" style={{ color: "#5c6370" }} />
+                    <Circle className="h-5 w-5" style={{ color: "var(--color-text-secondary)" }} />
                   )}
                 </button>
 
@@ -298,7 +298,7 @@ export default function TodoView() {
                 <div className="flex-1 min-w-0">
                   <p
                     className={cn("text-sm", todo.done && "line-through")}
-                    style={{ color: todo.done ? "#5c6370" : "#d7dae0" }}
+                    style={{ color: todo.done ? "var(--color-text-secondary)" : "var(--color-text-bright)" }}
                   >
                     {todo.text}
                   </p>
@@ -307,8 +307,8 @@ export default function TodoView() {
                     <span
                       className="flex items-center gap-1 text-[10px] rounded-full px-1.5 py-0.5"
                       style={{
-                        color: CATEGORY_COLORS[todo.category] ?? "#5c6370",
-                        background: (CATEGORY_COLORS[todo.category] ?? "#5c6370") + "15",
+                        color: CATEGORY_COLORS[todo.category] ?? "var(--color-text-secondary)",
+                        background: `color-mix(in srgb, ${CATEGORY_COLORS[todo.category] ?? "var(--color-text-secondary)"} 8%, transparent)`,
                       }}
                     >
                       <Tag className="h-2.5 w-2.5" />
@@ -319,7 +319,7 @@ export default function TodoView() {
                     {todo.createdBy !== "user" && (
                       <span
                         className="flex items-center gap-0.5 text-[10px]"
-                        style={{ color: "#61afef" }}
+                        style={{ color: "var(--color-accent)" }}
                       >
                         <Bot className="h-2.5 w-2.5" />
                         {todo.createdBy}
@@ -327,7 +327,7 @@ export default function TodoView() {
                     )}
 
                     {/* Time */}
-                    <span className="text-[10px]" style={{ color: "#5c6370" }}>
+                    <span className="text-[10px]" style={{ color: "var(--color-text-secondary)" }}>
                       {new Date(todo.createdAt).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",

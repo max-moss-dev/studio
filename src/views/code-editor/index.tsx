@@ -87,7 +87,7 @@ export default function CodeEditorView({ viewId }: { viewId?: string }) {
       <textarea
         value={code}
         onChange={(e) => setCode(e.target.value)}
-        className="flex-1 p-4 bg-[#282c34] text-[#abb2bf] resize-none font-mono text-sm leading-relaxed focus:outline-none"
+        className="flex-1 p-4 bg-bg-base text-text-primary resize-none font-mono text-sm leading-relaxed focus:outline-none"
         spellCheck={false}
       />
     </div>

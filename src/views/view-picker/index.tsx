@@ -270,7 +270,7 @@ export default function ViewPickerView() {
                         onClick={() => handleExportPlugin(view.id)}
                       >
                         {copied === view.id ? (
-                          <Check className="h-3.5 w-3.5 text-[#98c379]" />
+                          <Check className="h-3.5 w-3.5 text-status-online" />
                         ) : (
                           <Share2 className="h-3.5 w-3.5" />
                         )}
@@ -371,7 +371,7 @@ export default function ViewPickerView() {
                       onClick={() => handleExportPlugin(view.id)}
                     >
                       {copied === view.id ? (
-                        <Check className="h-3.5 w-3.5 text-[#98c379]" />
+                        <Check className="h-3.5 w-3.5 text-status-online" />
                       ) : (
                         <Share2 className="h-3.5 w-3.5" />
                       )}

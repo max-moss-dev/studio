@@ -57,16 +57,16 @@ export default function OfficeView({ agents }: ViewProps) {
   }, [])
 
   return (
-    <div ref={containerRef} className="h-full w-full relative overflow-hidden bg-[#0f0f11]">
+    <div ref={containerRef} className="h-full w-full relative overflow-hidden bg-canvas-base">
       <canvas ref={canvasRef} className="block" />
 
       {/* Legend */}
       <div className="absolute bottom-4 left-4 flex gap-3 rounded-lg border bg-card/80 backdrop-blur-sm px-3 py-2">
         {[
-          { color: "#22c55e", label: "Online" },
-          { color: "#eab308", label: "Busy" },
-          { color: "#6b7280", label: "Offline" },
-          { color: "#ef4444", label: "Error" },
+          { color: "var(--color-status-online)", label: "Online" },
+          { color: "var(--color-status-busy)", label: "Busy" },
+          { color: "var(--color-status-offline)", label: "Offline" },
+          { color: "var(--color-status-error)", label: "Error" },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1.5">
             <span
