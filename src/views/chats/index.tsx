@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
-  Send,
+  ArrowUp,
   Bot,
   User,
   Wrench,
@@ -384,7 +384,7 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
 
             {/* Input */}
             <div className="border-t p-4">
-              <div className="flex gap-2 max-w-2xl mx-auto">
+              <div className="relative max-w-2xl mx-auto">
                 <Input
                   placeholder={`Message ${selectedAgent.name}...`}
                   value={inputText}
@@ -395,15 +395,15 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
                       handleSend()
                     }
                   }}
-                  className="flex-1"
+                  className="pr-12"
                 />
-                <Button
-                  size="icon"
+                <button
                   onClick={handleSend}
                   disabled={!inputText.trim()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-primary flex items-center justify-center disabled:opacity-40"
                 >
-                  <Send className="h-4 w-4" />
-                </Button>
+                  <ArrowUp className="h-4 w-4 text-primary-foreground" />
+                </button>
               </div>
             </div>
           </>
