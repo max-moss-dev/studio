@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { useViewStore } from "@/stores/view-store"
 import { useTabStore } from "@/stores/tab-store"
@@ -8,7 +8,7 @@ import {
   Bot,
   Kanban,
   MessageSquare,
-  Building2,
+  Share2 as NetworkIcon,
   Sparkles,
   Wand2,
   Loader2,
@@ -25,6 +25,8 @@ import {
   FileText,
   CheckCircle,
   Code,
+  Upload,
+  ClipboardPaste,
 } from "lucide-react"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { uid } from "@/lib/mock-data"
@@ -33,7 +35,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   bot: Bot,
   kanban: Kanban,
   "message-square": MessageSquare,
-  "building-2": Building2,
+  "share-2": NetworkIcon,
+  "building-2": NetworkIcon,
   sparkles: Sparkles,
   puzzle: Puzzle,
   link: Link,
@@ -52,12 +55,17 @@ export default function ViewPickerView() {
   const [generating, setGenerating] = useState(false)
   const [pluginUrl, setPluginUrl] = useState("")
   const [copied, setCopied] = useState<string | null>(null)
+  const [importJson, setImportJson] = useState("")
+  const [importError, setImportError] = useState<string | null>(null)
+  const [showImport, setShowImport] = useState(false)
 
   const views = useViewStore((s) => s.views)
   const removeView = useViewStore((s) => s.removeView)
   const registerView = useViewStore((s) => s.registerView)
   const installPlugin = useViewStore((s) => s.installPlugin)
-  const exportPlugin = useViewStore((s) => s.exportPlugin)
+  const exportPackage = useViewStore((s) => s.exportPackage)
+  const importPackage = useViewStore((s) => s.importPackage)
+  const importPackageFromUrl = useViewStore((s) => s.importPackageFromUrl)
   const installing = useViewStore((s) => s.installing)
   const installError = useViewStore((s) => s.installError)
   const clearInstallError = useViewStore((s) => s.clearInstallError)
@@ -72,58 +80,28 @@ export default function ViewPickerView() {
   const aiViews = views.filter((v) => v.type === "ai-generated")
   const plugins = views.filter((v) => v.type === "plugin")
 
-  const [cloning, setCloning] = useState<string | null>(null)
+  // Track pending AI generation
+  const pendingRequestRef = useRef<string | null>(null)
+
+  // Watch for view.generated events
+  useEffect(() => {
+    if (!pendingRequestRef.current) return
+
+    const viewId = `ai-${pendingRequestRef.current}`
+    const view = views.find((v) => v.id === viewId && v.code)
+    if (view) {
+      // View was generated — open it
+      openTab(viewId, view.title, "sparkles")
+      if (activeTabId) closeTab(activeTabId)
+      setGenerating(false)
+      setAiPrompt("")
+      pendingRequestRef.current = null
+    }
+  }, [views, activeTabId, closeTab, openTab])
 
   function handleOpenView(viewId: string, title: string, icon?: string) {
     openTab(viewId, title, icon)
-    // Close the view-picker tab
     if (activeTabId) closeTab(activeTabId)
-  }
-
-  async function handleCloneView(viewId: string, title: string, icon?: string) {
-    setCloning(viewId)
-    try {
-      // Fetch source code of built-in view
-      const res = await fetch(`/api/views?id=${encodeURIComponent(viewId)}`)
-      const data = await res.json()
-      if (!data.code) {
-        console.error("Failed to fetch view source")
-        setCloning(null)
-        return
-      }
-
-      // Generate a clean clone ID
-      const cloneId = `${viewId}-copy-${Date.now().toString(36)}`
-
-      // Write the file to disk via API
-      const writeRes = await fetch("/api/views", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: cloneId, code: data.code }),
-      })
-
-      if (!writeRes.ok) {
-        const err = await writeRes.json()
-        console.error("Failed to write view:", err)
-        setCloning(null)
-        return
-      }
-
-      // Register in view store
-      registerView({
-        id: cloneId,
-        title: `${title} (Copy)`,
-        icon: icon ?? "sparkles",
-        type: "ai-generated",
-        createdAt: Date.now(),
-      })
-
-      openTab(cloneId, `${title} (Copy)`, icon)
-      if (activeTabId) closeTab(activeTabId)
-    } catch (err) {
-      console.error("Clone failed:", err)
-    }
-    setCloning(null)
   }
 
   function handleEditCode(viewId: string) {
@@ -134,8 +112,24 @@ export default function ViewPickerView() {
   async function handleInstallPlugin() {
     if (!pluginUrl.trim()) return
     clearInstallError()
+
+    const url = pluginUrl.trim()
+
+    // Try as ViewPackage JSON URL first if it looks like JSON
     try {
-      const view = await installPlugin(pluginUrl.trim())
+      if (url.endsWith(".json") || !url.includes("github.com")) {
+        const view = await importPackageFromUrl(url)
+        openTab(view.id, view.title, view.icon)
+        if (activeTabId) closeTab(activeTabId)
+        setPluginUrl("")
+        return
+      }
+    } catch {
+      // Fall through to plugin install
+    }
+
+    try {
+      const view = await installPlugin(url)
       openTab(view.id, view.title, view.icon)
       if (activeTabId) closeTab(activeTabId)
       setPluginUrl("")
@@ -144,8 +138,8 @@ export default function ViewPickerView() {
     }
   }
 
-  function handleExportPlugin(id: string) {
-    const json = exportPlugin(id)
+  function handleExport(id: string) {
+    const json = exportPackage(id)
     if (json) {
       navigator.clipboard.writeText(json)
       setCopied(id)
@@ -153,30 +147,69 @@ export default function ViewPickerView() {
     }
   }
 
-  async function handleGenerate() {
+  function handleExportDownload(id: string) {
+    const json = exportPackage(id)
+    if (!json) return
+    const view = views.find((v) => v.id === id)
+    const blob = new Blob([json], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${view?.id ?? "view"}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleImport() {
+    setImportError(null)
+    try {
+      const view = importPackage(importJson)
+      openTab(view.id, view.title, view.icon)
+      if (activeTabId) closeTab(activeTabId)
+      setImportJson("")
+      setShowImport(false)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Invalid JSON")
+    }
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = reader.result as string
+      setImportError(null)
+      try {
+        const view = importPackage(text)
+        openTab(view.id, view.title, view.icon)
+        if (activeTabId) closeTab(activeTabId)
+        setShowImport(false)
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : "Invalid JSON file")
+        setImportJson(text)
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ""
+  }
+
+  function handleGenerate() {
     if (!aiPrompt.trim() || !connected) return
     setGenerating(true)
 
     const requestId = uid()
-    const viewId = `ai-${requestId}`
+    pendingRequestRef.current = requestId
 
     send({ type: "view.generate", prompt: aiPrompt.trim(), requestId })
 
+    // Timeout — if no response in 30s, show error
     setTimeout(() => {
-      const newView = {
-        id: viewId,
-        title: aiPrompt.trim().slice(0, 40),
-        icon: "sparkles",
-        type: "ai-generated" as const,
-        code: "",
-        createdAt: Date.now(),
+      if (pendingRequestRef.current === requestId) {
+        setGenerating(false)
+        pendingRequestRef.current = null
       }
-      registerView(newView)
-      openTab(viewId, newView.title, "sparkles")
-      if (activeTabId) closeTab(activeTabId)
-      setGenerating(false)
-      setAiPrompt("")
-    }, 3000)
+    }, 30000)
   }
 
   return (
@@ -185,7 +218,7 @@ export default function ViewPickerView() {
         <div>
           <h2 className="text-lg font-semibold">Open View</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Choose a built-in view, install a plugin, or generate one with AI.
+            Choose a built-in view, import a package, or generate one with AI.
           </p>
         </div>
 
@@ -198,33 +231,84 @@ export default function ViewPickerView() {
             {builtInViews.map((view) => {
               const Icon = ICON_MAP[view.icon] ?? Sparkles
               return (
-                <div
+                <button
                   key={view.id}
-                  className="group flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent"
+                  onClick={() => handleOpenView(view.id, view.title, view.icon)}
+                  className="flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent cursor-pointer"
                 >
-                  <button
-                    onClick={() => handleOpenView(view.id, view.title, view.icon)}
-                    className="flex items-center gap-3 flex-1 cursor-pointer"
-                  >
-                    <Icon className="h-5 w-5 text-primary" />
-                    <span className="text-sm font-medium">{view.title}</span>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleCloneView(view.id, view.title, view.icon) }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity cursor-pointer"
-                    title="Clone as editable copy"
-                  >
-                    {cloning === view.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </div>
+                  <Icon className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-medium">{view.title}</span>
+                </button>
               )
             })}
           </div>
         </div>
+
+        {/* AI-generated views */}
+        {aiViews.length > 0 && (
+          <div>
+            <h3 className="mb-3 text-sm font-medium text-muted-foreground">
+              AI-Generated Views
+            </h3>
+            <div className="flex flex-col gap-1">
+              {aiViews.map((view) => (
+                <div
+                  key={view.id}
+                  className="flex items-center justify-between rounded-lg border p-3"
+                >
+                  <button
+                    onClick={() => handleOpenView(view.id, view.title, view.icon)}
+                    className="flex items-center gap-3 text-left cursor-pointer flex-1 min-w-0"
+                  >
+                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-sm truncate">{view.title}</span>
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Edit code"
+                      onClick={() => handleEditCode(view.id)}
+                    >
+                      <Code className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Copy as JSON"
+                      onClick={() => handleExport(view.id)}
+                    >
+                      {copied === view.id ? (
+                        <Check className="h-3.5 w-3.5 text-[#98c379]" />
+                      ) : (
+                        <Share2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Download JSON"
+                      onClick={() => handleExportDownload(view.id)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => removeView(view.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Installed plugins */}
         {plugins.length > 0 && (
@@ -266,8 +350,8 @@ export default function ViewPickerView() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        title="Copy plugin JSON"
-                        onClick={() => handleExportPlugin(view.id)}
+                        title="Copy as JSON"
+                        onClick={() => handleExport(view.id)}
                       >
                         {copied === view.id ? (
                           <Check className="h-3.5 w-3.5 text-[#98c379]" />
@@ -291,17 +375,69 @@ export default function ViewPickerView() {
           </div>
         )}
 
-        {/* Install from URL */}
+        {/* AI Generator */}
         <div>
           <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-            Install Plugin
+            Generate with AI
           </h3>
+          <div className="flex gap-2">
+            <textarea
+              placeholder="Describe the view you want..."
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleGenerate()
+                }
+              }}
+              className="flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              rows={2}
+            />
+            <Button
+              onClick={handleGenerate}
+              disabled={!aiPrompt.trim() || generating || !connected}
+              className="gap-2 self-end"
+            >
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4" />
+              )}
+              Generate
+            </Button>
+          </div>
+          {generating && (
+            <p className="text-xs text-muted-foreground mt-2 animate-pulse">
+              Generating view...
+            </p>
+          )}
+        </div>
+
+        {/* Import / Install */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-muted-foreground">
+              Import View
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs gap-1"
+              onClick={() => setShowImport(!showImport)}
+            >
+              <ClipboardPaste className="h-3 w-3" />
+              {showImport ? "Hide" : "Paste JSON"}
+            </Button>
+          </div>
+
+          {/* URL install */}
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
                 type="url"
-                placeholder="Paste plugin URL..."
+                placeholder="URL to JSON package or plugin..."
                 value={pluginUrl}
                 onChange={(e) => {
                   setPluginUrl(e.target.value)
@@ -332,91 +468,51 @@ export default function ViewPickerView() {
               <span>{installError}</span>
             </div>
           )}
-        </div>
 
-        {/* AI-generated views */}
-        {aiViews.length > 0 && (
-          <div>
-            <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-              AI-Generated Views
-            </h3>
-            <div className="flex flex-col gap-1">
-              {aiViews.map((view) => (
-                <div
-                  key={view.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
+          {/* JSON paste import */}
+          {showImport && (
+            <div className="mt-3 flex flex-col gap-2">
+              <textarea
+                placeholder='Paste ViewPackage JSON here...'
+                value={importJson}
+                onChange={(e) => {
+                  setImportJson(e.target.value)
+                  setImportError(null)
+                }}
+                className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                rows={4}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleImport}
+                  disabled={!importJson.trim()}
+                  size="sm"
+                  className="gap-1.5"
                 >
-                  <button
-                    onClick={() => handleOpenView(view.id, view.title, view.icon)}
-                    className="flex items-center gap-3 text-left cursor-pointer"
-                  >
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <span className="text-sm">{view.title}</span>
-                  </button>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      title="Edit code"
-                      onClick={() => handleEditCode(view.id)}
-                    >
-                      <Code className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      title="Copy as plugin JSON"
-                      onClick={() => handleExportPlugin(view.id)}
-                    >
-                      {copied === view.id ? (
-                        <Check className="h-3.5 w-3.5 text-[#98c379]" />
-                      ) : (
-                        <Share2 className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => removeView(view.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  Import JSON
+                </Button>
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportFile}
+                    className="hidden"
+                  />
+                  <Button variant="outline" size="sm" className="gap-1.5 pointer-events-none">
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload .json
+                  </Button>
+                </label>
+              </div>
+              {importError && (
+                <div className="flex items-center gap-2 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{importError}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* AI Generator */}
-        <div>
-          <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-            Generate with AI
-          </h3>
-          <div className="flex gap-2">
-            <textarea
-              placeholder="Describe the view you want..."
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              className="flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              rows={2}
-            />
-            <Button
-              onClick={handleGenerate}
-              disabled={!aiPrompt.trim() || generating || !connected}
-              className="gap-2 self-end"
-            >
-              {generating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Wand2 className="h-4 w-4" />
               )}
-              Generate
-            </Button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

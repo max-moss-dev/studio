@@ -92,7 +92,7 @@ async function buildDeviceBlock(opts: DeviceBlockOpts): Promise<Record<string, u
   const rawPubBytes = hexToBytes(kp.publicKey)
 
   // Device ID = SHA-256(raw 32-byte public key)
-  const hash = await crypto.subtle.digest("SHA-256", rawPubBytes)
+  const hash = await crypto.subtle.digest("SHA-256", rawPubBytes as unknown as ArrayBuffer)
   const fingerprint = bytesToHex(new Uint8Array(hash))
 
   // v2 pipe-delimited payload

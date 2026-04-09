@@ -53,8 +53,8 @@ Tasks (shared todo list):
 - todo.list: List all tasks
 - todo.complete: Mark a task done (params: id)
 
-Views (UI components — React+JSX, self-contained, no imports):
-- view.update: Update an AI-generated view's code (params: viewId, code). The code must be a valid React component with export default. Only React hooks (useState, useEffect, useMemo, useCallback, useRef) are available. Props: { agents, events, tasks, messages, models, send }.
+Views (React components rendered in Sandpack iframe):
+- view.update: Update an AI-generated view's code (params: viewId, code). The code must import { useViewProps, send } from './bridge' and export default a React component. useViewProps() returns { agents, events, tasks, messages, models }. send(msg) sends GatewayMessages. You can use any npm package.
 
 Tips:
 - Use GFM markdown: tables, task lists (- [ ] / - [x]), code blocks, blockquotes
@@ -106,26 +106,29 @@ export function setViewStoreAccessors(
  * Execute a tool call locally and return the result.
  */
 async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
-  // Handle view.update — write file to disk + update store
+  // Handle view.update — update code in view store (localStorage)
   if (tool === "view.update") {
     const viewId = params.viewId as string
     const code = params.code as string
     if (!viewId || !code) return { error: "viewId and code required" }
-    if (!_viewStoreGet) return { error: "View store not available" }
+    if (!_viewStoreGet || !_viewStoreRegister) return { error: "View store not available" }
     const existing = _viewStoreGet(viewId)
     if (existing?.type === "built-in") return { error: "Cannot edit built-in views. Clone it first." }
 
-    // Write to disk
-    const writeRes = await fetch("/api/views", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: viewId, code }),
-    })
-    if (!writeRes.ok) {
-      const err = await writeRes.json()
-      return { error: err.error ?? "Failed to write view" }
+    // Update in store — Sandpack views render from code in store, no file writes needed
+    if (existing) {
+      _viewStoreRegister({ ...existing, code } as Record<string, unknown>)
+    } else {
+      _viewStoreRegister({
+        id: viewId,
+        title: viewId,
+        icon: "sparkles",
+        type: "ai-generated",
+        code,
+        createdAt: Date.now(),
+      })
     }
-    return { ok: true, viewId, message: "View updated. Reload the tab to see changes." }
+    return { ok: true, viewId, message: "View updated. Changes are live." }
   }
 
   try {
@@ -162,7 +165,8 @@ interface GatewayState {
   tasks: Task[]
   messages: Record<string, Message[]>
 
-  // Raw gateway data (for debugging / future views)
+  // Extra data
+  models: string[]
   sessions: unknown[]
   presence: Record<string, unknown>
 
@@ -405,6 +409,28 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         })
         break
       }
+
+      case "view.generated": {
+        // Register the generated view in the view store
+        if (_viewStoreRegister) {
+          const viewId = `ai-${event.requestId}`
+          _viewStoreRegister({
+            id: viewId,
+            title: event.title ?? "AI View",
+            icon: "sparkles",
+            type: "ai-generated",
+            code: event.code,
+            dependencies: event.dependencies ?? {},
+            skill: event.skill ?? "",
+            createdAt: Date.now(),
+          })
+        }
+        break
+      }
+
+      case "view.generate.error":
+        console.error(`[View Generate Error] ${event.requestId}: ${event.error}`)
+        break
 
       case "pong":
       case "message.stream.end":

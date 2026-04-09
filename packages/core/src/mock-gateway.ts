@@ -168,6 +168,9 @@ export class MockGateway {
             type: "view.generated",
             requestId: msg.requestId,
             code: MOCK_GENERATED_VIEW,
+            dependencies: MOCK_GENERATED_DEPS,
+            skill: MOCK_GENERATED_SKILL,
+            title: "Agent Dashboard",
           })
         }, 2000 + Math.random() * 2000)
         break
@@ -191,44 +194,100 @@ export class MockGateway {
 }
 
 const MOCK_GENERATED_VIEW = `
-function TokenChart() {
-  const { agents } = useAgentData();
+import { useViewProps } from "./bridge"
 
-  const data = agents.map(agent => ({
-    name: agent.name,
-    tokens: agent.tokensToday,
-    role: agent.role,
-  }));
+const ROLE_COLORS = {
+  orchestrator: "#61afef",
+  coder: "#98c379",
+  reviewer: "#c678dd",
+  researcher: "#e5c07b",
+  custom: "#5c6370",
+}
 
-  const roleColors = {
-    orchestrator: "#3b82f6",
-    coder: "#22c55e",
-    reviewer: "#a855f7",
-    researcher: "#f97316",
-    custom: "#6b7280",
-  };
+const STATUS_COLORS = {
+  online: "#98c379",
+  busy: "#e5c07b",
+  error: "#e06c75",
+  offline: "#5c6370",
+}
+
+export default function AgentDashboard() {
+  const { agents, tasks, events } = useViewProps()
+
+  const totalTokens = agents.reduce((sum, a) => sum + a.tokensToday, 0)
+  const onlineCount = agents.filter((a) => a.status === "online" || a.status === "busy").length
+  const activeTasks = tasks.filter((t) => t.status === "in_progress").length
 
   return (
-    <div style={{ width: "100%", height: "100%", padding: 24 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 16, color: "#e5e5e5" }}>
-        Token Usage by Agent (Today)
+    <div style={{ padding: 24, fontFamily: "system-ui, sans-serif", color: "#abb2bf" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20, color: "#e5e5e5" }}>
+        Agent Dashboard
       </h2>
-      <ResponsiveContainer width="100%" height={400}>
-        <BarChart data={data}>
-          <XAxis dataKey="name" stroke="#888" />
-          <YAxis stroke="#888" />
-          <Tooltip
-            contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-            labelStyle={{ color: "#e5e5e5" }}
-          />
-          <Bar dataKey="tokens" radius={[4, 4, 0, 0]}>
-            {data.map((entry, index) => (
-              <Cell key={index} fill={roleColors[entry.role] || "#6b7280"} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+
+      {/* Stats row */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 24 }}>
+        {[
+          { label: "Agents Online", value: onlineCount + "/" + agents.length, color: "#98c379" },
+          { label: "Active Tasks", value: activeTasks, color: "#61afef" },
+          { label: "Tokens Today", value: totalTokens.toLocaleString(), color: "#e5c07b" },
+          { label: "Events", value: events.length, color: "#c678dd" },
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            flex: 1, padding: 16, background: "#2c313a", borderRadius: 8,
+            border: "1px solid #3e4451",
+          }}>
+            <div style={{ fontSize: 12, color: "#5c6370", marginBottom: 4 }}>{stat.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: stat.color }}>{stat.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Agent list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {agents.map((agent) => (
+          <div key={agent.id} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "12px 16px", background: "#2c313a", borderRadius: 8,
+            border: "1px solid #3e4451",
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: STATUS_COLORS[agent.status] || "#5c6370",
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: "#e5e5e5" }}>{agent.name}</div>
+              <div style={{ fontSize: 12, color: "#5c6370" }}>
+                {agent.role} · {agent.model}
+              </div>
+            </div>
+            <div style={{
+              fontSize: 11, padding: "2px 8px", borderRadius: 4,
+              background: ROLE_COLORS[agent.role] + "22",
+              color: ROLE_COLORS[agent.role],
+            }}>
+              {agent.role}
+            </div>
+            <div style={{ fontSize: 13, color: "#abb2bf", minWidth: 80, textAlign: "right" }}>
+              {agent.tokensToday.toLocaleString()} tokens
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
-  );
+  )
 }
+`.trim()
+
+const MOCK_GENERATED_DEPS: Record<string, string> = {}
+const MOCK_GENERATED_SKILL = `# Agent Dashboard
+## What it shows
+Overview of all agents with status, roles, token usage, and active tasks.
+## Data used
+- agents[].name, status, role, model, tokensToday
+- tasks[].status (for active task count)
+- events[].length (total event count)
+## How to modify
+- Add charts: add recharts to dependencies, import BarChart etc.
+- Filter by role: add role filter dropdown
+- Add click actions: use send() to interact with agents
 `.trim()

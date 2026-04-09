@@ -8,7 +8,8 @@ import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
 import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/stores/gateway-store"
 import { useGateway } from "@/hooks/use-gateway"
-import { Loader2, AlertTriangle, Radio } from "lucide-react"
+import { Loader2, AlertTriangle, Radio, Code } from "lucide-react"
+import { SandpackView } from "@/components/sandpack-view"
 
 // Lazy load built-in views
 const AgentManagerView = lazy(() => import("@/views/agent-manager"))
@@ -39,57 +40,12 @@ function ViewError({ message }: { message: string }) {
   )
 }
 
-/**
- * Renders a custom view by dynamically importing it from src/views/.
- * Uses real file imports — supports full Next.js hot reload.
- */
-function DynamicView({ viewId, viewProps }: { viewId: string; viewProps: Record<string, unknown> }) {
-  const [Component, setComponent] = useState<React.ComponentType<Record<string, unknown>> | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [key, setKey] = useState(0)
-
-  useEffect(() => {
-    setError(null)
-    setComponent(null)
-
-    // Strip prefixes like "custom-" if present
-    const cleanId = viewId.replace(/^(custom-|ai-|plugin-)/, "")
-
-    // Dynamic import from src/views/{id}
-    import(`@/views/${cleanId}/index.tsx`)
-      .then((mod) => {
-        const Comp = mod.default ?? mod.View ?? mod.Component
-        if (Comp) {
-          setComponent(() => Comp)
-        } else {
-          setError("View module has no default export")
-        }
-      })
-      .catch((err) => {
-        setError(`Failed to load view "${cleanId}": ${err.message}`)
-      })
-  }, [viewId, key])
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-        <AlertTriangle className="h-8 w-8" />
-        <p className="text-sm max-w-md text-center">{error}</p>
-        <Button variant="outline" size="sm" onClick={() => setKey((k) => k + 1)}>
-          Retry
-        </Button>
-      </div>
-    )
-  }
-  if (!Component) return <ViewFallback />
-
-  return <Component {...viewProps} />
-}
 
 function ActiveView() {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const tabs = useTabStore((s) => s.tabs)
   const openTab = useTabStore((s) => s.openTab)
+  const views = useViewStore((s) => s.views)
   const { agents, events, tasks, messages, send, models } = useGateway()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
@@ -127,24 +83,49 @@ function ActiveView() {
     return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
   }
 
-  // Custom/cloned views — dynamic import from src/views/{id}/
+  // Custom/AI-generated views — render in Sandpack iframe
+  const viewDef = views.find((v: { id: string }) => v.id === activeTab.viewId)
+  if (viewDef?.code) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center gap-2 border-b px-3 py-1.5 bg-muted/30 shrink-0">
+          <span className="text-xs text-muted-foreground flex-1">
+            {viewDef.type === "plugin" ? "Plugin" : "AI View"}: {activeTab.title}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 text-xs text-muted-foreground"
+            onClick={() => openTab("code-editor", `Edit: ${activeTab.title}`, "code", { viewId: activeTab.viewId })}
+          >
+            <Code className="h-3 w-3" />
+            Edit Code
+          </Button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <SandpackView
+            code={viewDef.code}
+            dependencies={viewDef.dependencies}
+            viewProps={viewProps}
+            onSend={send}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Fallback — view registered but no code (shouldn't happen normally)
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-3 py-1.5 bg-muted/30 shrink-0">
-        <span className="text-xs text-muted-foreground flex-1">Custom View: {activeTab.title}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 gap-1 text-xs text-muted-foreground"
-          onClick={() => openTab("code-editor", `Edit: ${activeTab.title}`, "code", { viewId: activeTab.viewId })}
-        >
-          <Radio className="h-3 w-3" />
-          Edit Code
-        </Button>
-      </div>
-      <div className="flex-1 overflow-hidden">
-        <DynamicView viewId={activeTab.viewId} viewProps={viewProps} />
-      </div>
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+      <AlertTriangle className="h-8 w-8" />
+      <p className="text-sm">View &quot;{activeTab.title}&quot; has no code</p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => openTab("code-editor", `Edit: ${activeTab.title}`, "code", { viewId: activeTab.viewId })}
+      >
+        Open Editor
+      </Button>
     </div>
   )
 }
@@ -261,7 +242,7 @@ export function AppShell() {
   // Wire up view store accessors for the gateway tool proxy
   useEffect(() => {
     setViewStoreAccessors(
-      (view) => registerView(view as import("@/lib/types").ViewDefinition),
+      (view) => registerView(view as unknown as import("@/lib/types").ViewDefinition),
       (id) => getView(id) as Record<string, unknown> | undefined
     )
   }, [registerView, getView])

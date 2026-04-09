@@ -8,6 +8,7 @@ import {
   pluginToView,
   exportPluginManifest,
 } from "@/lib/plugin-loader"
+import { generateSkill } from "@/lib/skill-generator"
 
 // Built-in views registered at startup
 const BUILT_IN_VIEWS: ViewDefinition[] = [
@@ -31,8 +32,8 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
   },
   {
     id: "office",
-    title: "Office",
-    icon: "building-2",
+    title: "Network",
+    icon: "share-2",
     type: "built-in",
   },
   {
@@ -61,6 +62,41 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
   },
 ]
 
+/**
+ * Validate a ViewPackage JSON for import.
+ */
+function validateViewPackage(data: unknown): ViewDefinition {
+  if (!data || typeof data !== "object") {
+    throw new Error("View package must be a JSON object")
+  }
+  const d = data as Record<string, unknown>
+  if (typeof d.id !== "string" || !d.id.trim()) {
+    throw new Error("View package must have a non-empty 'id'")
+  }
+  if (typeof d.title !== "string" || !d.title.trim()) {
+    throw new Error("View package must have a non-empty 'title'")
+  }
+  if (typeof d.code !== "string" || !d.code.trim()) {
+    throw new Error("View package must have non-empty 'code'")
+  }
+
+  return {
+    id: d.id,
+    title: d.title,
+    icon: typeof d.icon === "string" ? d.icon : "sparkles",
+    type: "ai-generated",
+    code: d.code,
+    dependencies: d.dependencies && typeof d.dependencies === "object"
+      ? d.dependencies as Record<string, string>
+      : undefined,
+    skill: typeof d.skill === "string" ? d.skill : undefined,
+    description: typeof d.description === "string" ? d.description : undefined,
+    author: typeof d.author === "string" ? d.author : undefined,
+    version: typeof d.version === "string" ? d.version : undefined,
+    createdAt: typeof d.createdAt === "number" ? d.createdAt : Date.now(),
+  }
+}
+
 interface ViewState {
   views: ViewDefinition[]
   installing: boolean
@@ -77,6 +113,11 @@ interface ViewState {
   installPlugin: (url: string) => Promise<ViewDefinition>
   exportPlugin: (id: string) => string | null
   clearInstallError: () => void
+
+  // ViewPackage import/export
+  importPackage: (json: string) => ViewDefinition
+  exportPackage: (id: string) => string | null
+  importPackageFromUrl: (url: string) => Promise<ViewDefinition>
 }
 
 export const useViewStore = create<ViewState>()(
@@ -87,9 +128,21 @@ export const useViewStore = create<ViewState>()(
       installError: null,
 
       registerView(view: ViewDefinition) {
+        // Auto-generate skill if view has code but no skill
+        let viewWithSkill = view
+        if (view.code && !view.skill) {
+          viewWithSkill = {
+            ...view,
+            skill: generateSkill({
+              title: view.title,
+              code: view.code,
+              dependencies: view.dependencies,
+            }),
+          }
+        }
         set((s) => {
-          const filtered = s.views.filter((v) => v.id !== view.id)
-          return { views: [...filtered, view] }
+          const filtered = s.views.filter((v) => v.id !== viewWithSkill.id)
+          return { views: [...filtered, viewWithSkill] }
         })
       },
 
@@ -143,6 +196,59 @@ export const useViewStore = create<ViewState>()(
 
       clearInstallError() {
         set({ installError: null })
+      },
+
+      // ── ViewPackage import/export ──────────────────────
+
+      importPackage(json: string): ViewDefinition {
+        const data = JSON.parse(json)
+        const view = validateViewPackage(data)
+        set((s) => {
+          const filtered = s.views.filter((v) => v.id !== view.id)
+          return { views: [...filtered, view] }
+        })
+        return view
+      },
+
+      exportPackage(id: string): string | null {
+        const view = get().views.find((v) => v.id === id)
+        if (!view || !view.code) return null
+
+        const pkg: Record<string, unknown> = {
+          id: view.id,
+          title: view.title,
+          icon: view.icon,
+          description: view.description,
+          code: view.code,
+        }
+
+        if (view.dependencies && Object.keys(view.dependencies).length > 0) {
+          pkg.dependencies = view.dependencies
+        }
+        if (view.skill) {
+          pkg.skill = view.skill
+        }
+        if (view.author) pkg.author = view.author
+        if (view.version) pkg.version = view.version
+
+        return JSON.stringify(pkg, null, 2)
+      },
+
+      async importPackageFromUrl(url: string): Promise<ViewDefinition> {
+        set({ installing: true, installError: null })
+        try {
+          const res = await fetch(url)
+          if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`)
+          const json = await res.text()
+          const view = get().importPackage(json)
+          set({ installing: false })
+          return view
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to import from URL"
+          set({ installing: false, installError: message })
+          throw err
+        }
       },
     }),
     {

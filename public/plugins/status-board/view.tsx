@@ -1,4 +1,4 @@
-function StatusCard({ label, value, color }) {
+function StatusCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
     <div style={{
       padding: 20,
@@ -14,7 +14,8 @@ function StatusCard({ label, value, color }) {
   )
 }
 
-export default function View({ agents }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export default function View({ agents }: { agents: any[] }) {
   const online = (agents || []).filter(a => a.status === "online").length
   const busy = (agents || []).filter(a => a.status === "busy").length
   const offline = (agents || []).filter(a => a.status === "offline").length

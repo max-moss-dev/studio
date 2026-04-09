@@ -83,6 +83,8 @@ export interface ViewDefinition {
   icon: string
   type: "built-in" | "ai-generated" | "plugin"
   code?: string // JSX source for AI-generated / plugin views
+  dependencies?: Record<string, string> // npm packages, e.g. { "recharts": "^2.8.0" }
+  skill?: string // auto-generated agent instructions (markdown)
   createdAt?: number
   // Plugin metadata
   description?: string
@@ -126,7 +128,7 @@ export type GatewayEvent =
   | { type: "message"; message: Message }
   | { type: "message.stream"; agentId: string; messageId: string; delta: string }
   | { type: "message.stream.end"; agentId: string; messageId: string }
-  | { type: "view.generated"; requestId: string; code: string }
+  | { type: "view.generated"; requestId: string; code: string; dependencies?: Record<string, string>; skill?: string; title?: string }
   | { type: "view.generate.error"; requestId: string; error: string }
   | { type: "error"; code: string; message: string }
   | { type: "pong" }
