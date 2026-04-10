@@ -9,8 +9,11 @@ interface TabState {
   activeTabId: string | null
   openTab: (viewId: string, title: string, icon?: string, initialState?: Record<string, unknown>) => string
   closeTab: (id: string) => void
+  closeOtherTabs: (id: string) => void
   setActiveTab: (id: string) => void
   updateTabState: (id: string, state: Record<string, unknown>) => void
+  reorderTabs: (fromIndex: number, toIndex: number) => void
+  duplicateTab: (id: string) => string | null
 }
 
 let tabCounter = 0
@@ -40,19 +43,25 @@ export const useTabStore = create<TabState>()(
 
       closeTab(id: string) {
         const { tabs, activeTabId } = get()
-        if (tabs.length <= 1) return // Keep at least one tab
+        if (tabs.length <= 1) return
 
         const idx = tabs.findIndex((t) => t.id === id)
         const newTabs = tabs.filter((t) => t.id !== id)
         let newActive = activeTabId
 
         if (activeTabId === id) {
-          // Activate adjacent tab
           const newIdx = Math.min(idx, newTabs.length - 1)
           newActive = newTabs[newIdx]?.id ?? null
         }
 
         set({ tabs: newTabs, activeTabId: newActive })
+      },
+
+      closeOtherTabs(id: string) {
+        const { tabs } = get()
+        const tab = tabs.find((t) => t.id === id)
+        if (!tab) return
+        set({ tabs: [tab], activeTabId: id })
       },
 
       setActiveTab(id: string) {
@@ -65,6 +74,21 @@ export const useTabStore = create<TabState>()(
             t.id === id ? { ...t, state: { ...t.state, ...state } } : t
           ),
         }))
+      },
+
+      reorderTabs(fromIndex: number, toIndex: number) {
+        set((s) => {
+          const tabs = [...s.tabs]
+          const [moved] = tabs.splice(fromIndex, 1)
+          tabs.splice(toIndex, 0, moved)
+          return { tabs }
+        })
+      },
+
+      duplicateTab(id: string) {
+        const tab = get().tabs.find((t) => t.id === id)
+        if (!tab) return null
+        return get().openTab(tab.viewId, tab.title, tab.icon, tab.state)
       },
     }),
     {

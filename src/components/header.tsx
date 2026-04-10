@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Layers, Wifi, WifiOff, X, Plus, LogOut, Users } from "lucide-react"
 import {
   Bot,
@@ -41,6 +42,11 @@ export function Header() {
   const setActiveTab = useTabStore((s) => s.setActiveTab)
   const closeTab = useTabStore((s) => s.closeTab)
   const openTab = useTabStore((s) => s.openTab)
+  const reorderTabs = useTabStore((s) => s.reorderTabs)
+
+  // Tab drag state
+  const [dragTabIdx, setDragTabIdx] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
   function handleOpenSettings() {
     // Check if settings tab already exists
@@ -79,21 +85,39 @@ export function Header() {
         </span>
       </button>
 
-      {/* Tabs */}
+      {/* Tabs — draggable for reorder */}
       <div className="flex items-center flex-1 h-full overflow-x-auto">
-        {tabs.map((tab) => {
+        {tabs.map((tab, idx) => {
           const Icon = ICON_MAP[tab.icon ?? ""] ?? Sparkles
           const isActive = tab.id === activeTabId
+          const isDragOver = dragOverIdx === idx && dragTabIdx !== idx
 
           return (
             <button
               key={tab.id}
+              draggable
               onClick={() => setActiveTab(tab.id)}
+              onAuxClick={(e) => {
+                if (e.button === 1 && tabs.length > 1) {
+                  e.preventDefault()
+                  closeTab(tab.id)
+                }
+              }}
+              onDragStart={() => setDragTabIdx(idx)}
+              onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx) }}
+              onDragEnd={() => {
+                if (dragTabIdx !== null && dragOverIdx !== null && dragTabIdx !== dragOverIdx) {
+                  reorderTabs(dragTabIdx, dragOverIdx)
+                }
+                setDragTabIdx(null)
+                setDragOverIdx(null)
+              }}
               className={cn(
                 "group relative flex h-full items-center gap-1.5 px-[22px] text-xs font-medium transition-colors cursor-pointer shrink-0",
                 isActive
                   ? "bg-background text-foreground"
-                  : "text-muted-foreground hover:text-secondary-foreground"
+                  : "text-muted-foreground hover:text-secondary-foreground",
+                isDragOver && "border-l-2 border-primary"
               )}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
