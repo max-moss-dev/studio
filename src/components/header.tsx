@@ -1,16 +1,17 @@
 "use client"
 
-import { Layers, Wifi, WifiOff, X, Plus, LogOut } from "lucide-react"
+import { Layers, Wifi, WifiOff, X, Plus, LogOut, Users } from "lucide-react"
 import {
   Bot,
   Kanban,
   MessageSquare,
-  Building2,
+  Share2,
   Sparkles,
   Settings,
   LayoutGrid,
   FileText,
   CheckCircle,
+  Code,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useGatewayStore } from "@/stores/gateway-store"
@@ -21,12 +22,14 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   bot: Bot,
   kanban: Kanban,
   "message-square": MessageSquare,
-  "building-2": Building2,
+  "building-2": Share2,
+  "share-2": Share2,
   sparkles: Sparkles,
   settings: Settings,
   "layout-grid": LayoutGrid,
   "file-text": FileText,
   "check-circle": CheckCircle,
+  code: Code,
 }
 
 export function Header() {
@@ -59,15 +62,19 @@ export function Header() {
     }
   }
 
+  const agents = useGatewayStore((s) => s.agents)
+
   return (
     <header className="flex h-11 items-center bg-header-bg shrink-0">
       {/* Logo — opens settings */}
       <button
         onClick={handleOpenSettings}
-        className="flex items-center gap-2 px-3 shrink-0 h-full cursor-pointer hover:bg-background/30 transition-colors"
+        className="flex items-center gap-2.5 px-3 shrink-0 h-full cursor-pointer hover:bg-background/30 transition-colors"
       >
-        <Layers className="h-4.5 w-4.5 text-muted-foreground" />
-        <span className="text-sm font-semibold tracking-tight text-secondary-foreground">
+        <div className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#3e4451]">
+          <Layers className="h-4 w-4 text-[#abb2bf]" />
+        </div>
+        <span className="text-[15px] font-semibold tracking-tight text-secondary-foreground">
           Studio
         </span>
       </button>
@@ -120,8 +127,14 @@ export function Header() {
         </button>
       </div>
 
-      {/* Right side — status + logout */}
-      <div className="flex items-center gap-1.5 px-3 shrink-0">
+      {/* Right side — status + agent count + logout */}
+      <div className="flex items-center gap-2 px-3 shrink-0">
+        {connected && agents.length > 0 && (
+          <div className="flex items-center gap-1.5 rounded-xl bg-[#3e4451] px-2.5 py-0.5">
+            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{agents.length} Agent{agents.length !== 1 ? "s" : ""}</span>
+          </div>
+        )}
         <Badge
           variant={connected ? "default" : "secondary"}
           className="gap-1.5 text-xs cursor-pointer hover:opacity-80"

@@ -206,7 +206,8 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
     <div className="flex h-full">
       {/* Agent sidebar */}
       <div className="w-64 border-r flex flex-col">
-        <div className="p-2">
+        <div className="px-3 py-2">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-2">Conversations</h3>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -341,10 +342,10 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
                         </div>
                         <div
                           className={cn(
-                            "max-w-[75%] rounded-lg px-3 py-2",
+                            "max-w-[75%] px-3.5 py-2.5",
                             msg.role === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
+                              ? "bg-[#528bff] text-white rounded-[12px] rounded-br-[4px]"
+                              : "bg-card border border-border rounded-[12px] rounded-bl-[4px]"
                           )}
                         >
                           {msg.role === "assistant" ? (
@@ -358,7 +359,7 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
                             className={cn(
                               "block text-[10px] mt-1",
                               msg.role === "user"
-                                ? "text-primary-foreground/60"
+                                ? "text-white/50"
                                 : "text-muted-foreground"
                             )}
                           >

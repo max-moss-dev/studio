@@ -18,13 +18,20 @@ import {
   Search,
   Plus,
   RotateCw,
-  Archive,
+  Trash2,
   Bot,
   Clock,
   Coins,
   ChevronRight,
   X,
   MessageSquare,
+  Crown,
+  Code,
+  Eye,
+  FlaskConical,
+  Terminal,
+  CircleCheck,
+  CirclePlay,
 } from "lucide-react"
 import type { Agent, AgentStatus, AgentRole } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -51,6 +58,22 @@ const ROLE_COLORS: Record<AgentRole, string> = {
   reviewer: "text-[#c678dd] bg-[#c678dd]/10",
   researcher: "text-[#e5c07b] bg-[#e5c07b]/10",
   custom: "text-[#5c6370] bg-[#5c6370]/10",
+}
+
+const ROLE_AVATAR_BG: Record<AgentRole, string> = {
+  orchestrator: "bg-[#61afef]",
+  coder: "bg-[#98c379]",
+  reviewer: "bg-[#c678dd]",
+  researcher: "bg-[#e5c07b]",
+  custom: "bg-[#5c6370]",
+}
+
+const ROLE_ICONS: Record<AgentRole, React.ComponentType<{ className?: string }>> = {
+  orchestrator: Crown,
+  coder: Code,
+  reviewer: Eye,
+  researcher: FlaskConical,
+  custom: Terminal,
 }
 
 function formatUptime(seconds: number): string {
@@ -185,23 +208,20 @@ export default function AgentManagerView({ agents, send, models, initialAgentId 
                   selectedAgent?.id === agent.id && "bg-accent/50"
                 )}
               >
-                {/* Status dot */}
-                <span
-                  className={cn(
-                    "h-2.5 w-2.5 rounded-full shrink-0",
-                    STATUS_COLORS[agent.status]
-                  )}
-                />
+                {/* Avatar */}
+                <div className="relative shrink-0">
+                  <div className={cn("flex h-9 w-9 items-center justify-center rounded-full", ROLE_AVATAR_BG[agent.role])}>
+                    {(() => { const RoleIcon = ROLE_ICONS[agent.role]; return <RoleIcon className="h-4 w-4 text-white" /> })()}
+                  </div>
+                  <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background", STATUS_COLORS[agent.status])} />
+                </div>
 
                 {/* Name + role */}
                 <div className="min-w-[140px]">
                   <div className="text-sm font-medium">{agent.name}</div>
-                  <Badge
-                    variant="secondary"
-                    className={cn("mt-0.5 text-[10px]", ROLE_COLORS[agent.role])}
-                  >
-                    {agent.role}
-                  </Badge>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {agent.role} &middot; {agent.model}
+                  </div>
                 </div>
 
                 {/* Model */}
@@ -248,155 +268,94 @@ export default function AgentManagerView({ agents, send, models, initialAgentId 
           <p className="text-muted-foreground text-sm">Select an agent to view details</p>
         </div>
       )}
-      {selectedAgent && (
-        <div className="flex-1 border-l flex flex-col">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <h3 className="text-sm font-semibold">Agent Details</h3>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setSelectedAgent(null)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <ScrollArea className="flex-1 p-4">
-            <div className="flex flex-col gap-4">
-              {/* Header */}
-              <div className="flex items-center gap-3">
-                <span
-                  className={cn(
-                    "h-3 w-3 rounded-full",
-                    STATUS_COLORS[selectedAgent.status]
-                  )}
-                />
-                <div>
-                  <div className="font-medium">{selectedAgent.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {selectedAgent.id}
+      {selectedAgent && (() => {
+        const RoleIcon = ROLE_ICONS[selectedAgent.role]
+        return (
+        <div className="flex-1 border-l flex flex-col max-w-lg">
+          <ScrollArea className="flex-1">
+            <div className="p-8 flex flex-col gap-6">
+              {/* Header with avatar */}
+              <div className="flex items-center gap-4">
+                <div className={cn("flex h-14 w-14 items-center justify-center rounded-full shrink-0", ROLE_AVATAR_BG[selectedAgent.role])}>
+                  <RoleIcon className="h-7 w-7 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-[22px] font-semibold leading-tight">{selectedAgent.name}</h2>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <Badge variant="secondary" className={cn("text-[11px] font-medium", ROLE_COLORS[selectedAgent.role])}>
+                      {selectedAgent.role}
+                    </Badge>
+                    <div className="flex items-center gap-1.5 rounded-md bg-card px-2 py-0.5">
+                      <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_COLORS[selectedAgent.status])} />
+                      <span className={cn("text-[11px] font-medium", {
+                        "text-[#98c379]": selectedAgent.status === "online",
+                        "text-[#e5c07b]": selectedAgent.status === "busy",
+                        "text-[#e06c75]": selectedAgent.status === "error",
+                        "text-[#5c6370]": selectedAgent.status === "offline",
+                      })}>{STATUS_LABELS[selectedAgent.status]}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Stats cards */}
-              <div className="grid grid-cols-2 gap-2">
-                <Card>
-                  <CardHeader className="p-3 pb-1">
-                    <CardTitle className="text-xs text-muted-foreground">
-                      Output Tokens
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-3 pt-0">
-                    <span className="text-lg font-semibold">
-                      {formatTokens(selectedAgent.tokensToday)}
-                    </span>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="p-3 pb-1">
-                    <CardTitle className="text-xs text-muted-foreground">
-                      Input Tokens
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-3 pt-0">
-                    <span className="text-lg font-semibold">
-                      {formatTokens(selectedAgent.tokensTotal)}
-                    </span>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Info */}
-              <div className="flex flex-col gap-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Status</span>
-                  <Badge
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    {STATUS_LABELS[selectedAgent.status]}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Role</span>
-                  <Badge
-                    variant="secondary"
-                    className={cn("text-xs", ROLE_COLORS[selectedAgent.role])}
-                  >
-                    {selectedAgent.role}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Model</span>
-                  <span className="text-xs">{selectedAgent.model}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Uptime</span>
-                  <span className="text-xs">
-                    {formatUptime(selectedAgent.uptime)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Current task */}
-              {selectedAgent.currentTask && (
-                <div>
-                  <div className="mb-1 text-xs text-muted-foreground">
-                    Current Task
-                  </div>
-                  <div className="rounded-md border p-2 text-xs">
-                    {selectedAgent.currentTask}
-                  </div>
-                </div>
-              )}
-
-              {/* Config */}
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">
-                  Config
-                </div>
-                <pre className="rounded-md border bg-muted/50 p-2 text-xs overflow-auto max-h-40 font-mono">
-                  {JSON.stringify(selectedAgent.config, null, 2)}
-                </pre>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-1.5"
-                  onClick={() => openTab("chats", `Chat: ${selectedAgent.name}`, "message-square", { agentId: selectedAgent.id })}
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  Chat
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSelectedAgent(null)}>
+                  <X className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-1.5"
-                  onClick={() => handleRestart(selectedAgent.id)}
-                >
-                  <RotateCw className="h-3.5 w-3.5" />
-                  Restart
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openTab("chats", `Chat: ${selectedAgent.name}`, "message-square", { agentId: selectedAgent.id })}>
+                  <MessageSquare className="h-3.5 w-3.5" /> Chat
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-1.5 text-destructive hover:text-destructive"
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleRestart(selectedAgent.id)}>
+                  <RotateCw className="h-3.5 w-3.5" /> Restart
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5 bg-[#3e2828] border-[#5c3030] text-[#e06c75] hover:bg-[#4a2a2a] hover:text-[#e06c75]"
                   onClick={() => handleDelete(selectedAgent.id)}
-                  disabled={selectedAgent.name === "main" || selectedAgent.id === "main"}
-                >
-                  <Archive className="h-3.5 w-3.5" />
-                  Delete
+                  disabled={selectedAgent.name === "main" || selectedAgent.id === "main"}>
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
                 </Button>
+              </div>
+
+              {/* Stat cards */}
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: "Current Task", value: selectedAgent.currentTask ?? "None" },
+                  { label: "Tokens Today", value: formatTokens(selectedAgent.tokensToday) },
+                  { label: "Uptime", value: formatUptime(selectedAgent.uptime) },
+                  { label: "Total Tokens", value: formatTokens(selectedAgent.tokensTotal) },
+                ].map((stat) => (
+                  <div key={stat.label} className="rounded-[10px] border bg-card p-4 flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-muted-foreground">{stat.label}</span>
+                    <span className="text-sm font-medium truncate">{stat.value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Divider */}
+              <div className="h-px bg-border" />
+
+              {/* Configuration */}
+              <div>
+                <h3 className="text-base font-semibold mb-3">Configuration</h3>
+                <div className="rounded-[10px] border bg-[#3e4451] overflow-hidden flex flex-col gap-px">
+                  {[
+                    { label: "Model", value: selectedAgent.model },
+                    { label: "Status", value: STATUS_LABELS[selectedAgent.status] },
+                    { label: "Role", value: selectedAgent.role },
+                    { label: "ID", value: selectedAgent.id },
+                  ].map((row) => (
+                    <div key={row.label} className="flex justify-between items-center bg-card px-4 py-3">
+                      <span className="text-[13px] text-muted-foreground">{row.label}</span>
+                      <span className="text-[13px] font-mono text-secondary-foreground">{row.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </ScrollArea>
         </div>
-      )}
+        )
+      })()}
 
       {/* Add Agent Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>

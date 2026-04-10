@@ -17,11 +17,11 @@ import {
 import { Plus, Clock, Coins, GripVertical, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const COLUMNS: { id: TaskStatus; title: string; color: string }[] = [
-  { id: "queue", title: "Queue", color: "text-[#5c6370]" },
-  { id: "in_progress", title: "In Progress", color: "text-[#61afef]" },
-  { id: "review", title: "Review", color: "text-[#e5c07b]" },
-  { id: "done", title: "Done", color: "text-[#98c379]" },
+const COLUMNS: { id: TaskStatus; title: string; color: string; dotColor: string }[] = [
+  { id: "queue", title: "Queue", color: "text-[#5c6370]", dotColor: "bg-[#5c6370]" },
+  { id: "in_progress", title: "In Progress", color: "text-[#61afef]", dotColor: "bg-[#61afef]" },
+  { id: "review", title: "Review", color: "text-[#e5c07b]", dotColor: "bg-[#e5c07b]" },
+  { id: "done", title: "Done", color: "text-[#98c379]", dotColor: "bg-[#98c379]" },
 ]
 
 function formatDuration(seconds: number): string {
@@ -89,7 +89,7 @@ export default function KanbanView({ tasks, agents, send }: ViewProps) {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">Kanban Board</h2>
+        <h2 className="text-lg font-semibold">Task Board</h2>
         <Button size="sm" className="gap-1.5" onClick={() => setShowAddDialog(true)}>
           <Plus className="h-4 w-4" />
           New Task
@@ -113,9 +113,12 @@ export default function KanbanView({ tasks, agents, send }: ViewProps) {
             >
               {/* Column header */}
               <div className="flex items-center justify-between px-3 py-2.5 border-b">
-                <span className={cn("text-sm font-medium", col.color)}>
-                  {col.title}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={cn("h-2 w-2 rounded-full", col.dotColor)} />
+                  <span className={cn("text-sm font-semibold", col.color)}>
+                    {col.title}
+                  </span>
+                </div>
                 <Badge variant="secondary" className="text-xs">
                   {columnTasks.length}
                 </Badge>
@@ -132,8 +135,9 @@ export default function KanbanView({ tasks, agents, send }: ViewProps) {
                         draggable
                         onDragStart={(e) => handleDragStart(e, task)}
                         className={cn(
-                          "cursor-grab active:cursor-grabbing transition-opacity",
-                          draggedTask?.id === task.id && "opacity-50"
+                          "cursor-grab active:cursor-grabbing transition-opacity rounded-[10px]",
+                          draggedTask?.id === task.id && "opacity-50",
+                          task.status === "done" && "opacity-50"
                         )}
                       >
                         <CardContent className="p-3">
