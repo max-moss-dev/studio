@@ -1,8 +1,7 @@
 "use client"
 
-import { useState, useEffect, lazy, Suspense } from "react"
+import { useEffect, lazy, Suspense } from "react"
 import { Header } from "./header"
-import { ConnectionDialog } from "./connection-dialog"
 import { Button } from "@/components/ui/button"
 import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
@@ -237,8 +236,6 @@ export function AppShell() {
   const setActiveTab = useTabStore((s) => s.setActiveTab)
   const registerView = useViewStore((s) => s.registerView)
   const getView = useViewStore((s) => s.getView)
-  const [showInitialConnection, setShowInitialConnection] = useState(false)
-
   // Wire up view store accessors for the gateway tool proxy
   useEffect(() => {
     setViewStoreAccessors(
