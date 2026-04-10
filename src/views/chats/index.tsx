@@ -343,7 +343,7 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
                           className={cn(
                             "max-w-[75%] rounded-lg px-3 py-2",
                             msg.role === "user"
-                              ? "bg-primary text-primary-foreground"
+                              ? "bg-user-bubble-bg text-white"
                               : "bg-muted"
                           )}
                         >
@@ -358,7 +358,7 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
                             className={cn(
                               "block text-[10px] mt-1",
                               msg.role === "user"
-                                ? "text-primary-foreground/60"
+                                ? "text-white/70"
                                 : "text-muted-foreground"
                             )}
                           >

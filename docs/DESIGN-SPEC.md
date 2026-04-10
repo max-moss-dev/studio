@@ -136,19 +136,46 @@ This document describes every screen/app that needs to be designed in `design/st
 
 **Frame:** 1440x900, "App Store"
 
-### Layout: centered content, max-width 800
+### Layout: centered content, max-width 860, vertical stack
 
-### Search bar (top, centered, 600px max)
-- Large search input (44px height, #2c313a, border #3e4451, search icon, placeholder "Search apps...")
+---
 
-### Core Apps Section
-- Heading: "Core" (14px Geist 600, #d7dae0) + description "Essential apps for your workspace" (12px, #5c6370)
+### Section 1: Pinned Apps (top)
+- Label: "Pinned" (12px Geist 600, #5c6370, uppercase tracking)
+- **Horizontal row** of app icon tiles, gap 12, scrollable if overflow
+- Each tile (72x72 total, cornerRadius 12, bg #2c313a, hover: border #61afef):
+  - Icon circle (36x36, colored bg, white icon inside, cornerRadius 8)
+  - App name below icon (10px Inter 500, #abb2bf, centered, 1 line truncated)
+- Pin/unpin via right-click context menu or drag from main grid
+- Default pinned: Agents, Chats, Tasks Kanban, Media, Projects
+
+---
+
+### Section 2: Search Bar
+- Centered, 600px max-width
+- Large input (44px height, #2c313a, border #3e4451, cornerRadius 10)
+- Left: search icon (14px, #5c6370)
+- Placeholder: "Search apps…" (#5c6370)
+- Live-filters the active tab content below
+
+---
+
+### Section 3: Tabbed App Grid (Core · Demo · Categories)
+
+**Tab bar** — left-aligned, below search, gap 0, border-bottom #3e4451:
+- Tabs: **Core** | **Demo** | **Categories**
+- Active tab: text #d7dae0, border-bottom 2px #61afef, bg transparent
+- Inactive tab: text #5c6370
+- Each tab 80px wide, 36px height, 13px Inter 500
+
+#### Core tab (default active)
+- Description row: "Essential apps for your workspace" (12px, #5c6370) — shown below tab bar
 - **Grid: 2 columns**, gap 12
-- App cards (cornerRadius 12, bg #2c313a, padding 16, hover: border #61afef):
+- App card (cornerRadius 12, bg #2c313a, padding 16, hover: border #61afef):
   - Icon circle (40x40, colored bg, white icon)
   - Title (14px semibold, #d7dae0)
   - Description (12px, #5c6370, 2 lines max)
-  
+
 **Core apps:**
 | App | Icon | Color | Description |
 |---|---|---|---|
@@ -158,10 +185,10 @@ This document describes every screen/app that needs to be designed in `design/st
 | Media | file-text | #c678dd | Knowledge base & files |
 | Projects | folder | #61afef | Organize work into projects |
 
-### Demo Apps Section
-- Heading: "Demo" (14px Geist 600, #d7dae0) + "Showcase apps & starting points" (12px, #5c6370)
+#### Demo tab
+- Description row: "Showcase apps & starting points" (12px, #5c6370)
 - **Grid: 3 columns**, gap 12
-- Same card style but slightly smaller, muted icon colors (#3e4451 bg circles)
+- Same card style, muted icon colors (#3e4451 bg circles)
 
 **Demo apps:**
 | App | Icon | Description |
@@ -176,10 +203,30 @@ This document describes every screen/app that needs to be designed in `design/st
 | Telegram | send | Telegram bot integration |
 | Deployments | rocket | Deploy to GitHub Pages, Vercel |
 
-### Custom Apps Section (at bottom)
-- "Your Apps" heading
-- List of user-created/cloned apps with Edit/Delete buttons
-- "+ Create App" button
+#### Categories tab
+- Description row: "Browse by category" (12px, #5c6370)
+- **Grid: 3 columns**, gap 12
+- Category cards (cornerRadius 12, bg #2c313a, padding 16, hover: border #61afef):
+  - Category icon (28x28, colored)
+  - Category name (13px semibold, #d7dae0)
+  - App count badge (10px, #5c6370)
+
+**Categories:**
+| Category | Icon | Color |
+|---|---|---|
+| Productivity | check-square | #98c379 |
+| Communication | message-circle | #61afef |
+| Automation | cpu | #e5c07b |
+| Security | shield | #e06c75 |
+| Design | palette | #c678dd |
+| Data | database | #61afef |
+
+---
+
+### Section 4: Create New (bottom)
+- Centered, margin-top 24
+- "**+ Create New App**" button (primary, 44px height, 200px wide, bg #61afef, text white, cornerRadius 8, plus icon left)
+- Subtext below: "Build a custom app or clone an existing one" (11px, #5c6370, centered)
 
 ---
 

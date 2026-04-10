@@ -58,6 +58,7 @@
   --color-text-orange: var(--color-text-orange);
   --color-accent-muted: var(--color-accent-muted);
   --color-accent-selected: var(--color-accent-selected);
+  --color-user-bubble-bg: var(--user-bubble-bg);
   --color-overlay-dark: var(--color-overlay-dark);
   --color-canvas-base: var(--color-canvas-base);
 }
@@ -117,6 +118,7 @@
   --color-accent-selected: #528bff;
   --color-overlay-dark: #1a1d2388;
   --color-canvas-base: #0f0f11;
+  --user-bubble-bg: #2060a0;
 }
 
 body {
