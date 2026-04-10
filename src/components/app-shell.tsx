@@ -9,6 +9,8 @@ import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/s
 import { useGateway } from "@/hooks/use-gateway"
 import { Loader2, AlertTriangle, Radio, Code } from "lucide-react"
 import { SandpackView } from "@/components/sandpack-view"
+import { ViewErrorBoundary } from "@/components/error-boundary"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 
 // Lazy load built-in views
 const AgentManagerView = lazy(() => import("@/views/agent-manager"))
@@ -228,6 +230,8 @@ function Footer() {
 }
 
 export function AppShell() {
+  useKeyboardShortcuts()
+
   const connected = useGatewayStore((s) => s.connected)
   const connectGateway = useGatewayStore((s) => s.connectGateway)
   const connectMock = useGatewayStore((s) => s.connectMock)
@@ -270,7 +274,9 @@ export function AppShell() {
       <Header />
       <ConnectionErrorBanner />
       <main className="flex-1 overflow-hidden">
-        <ActiveView />
+        <ViewErrorBoundary>
+          <ActiveView />
+        </ViewErrorBoundary>
       </main>
       <Footer />
     </div>
