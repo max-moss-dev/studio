@@ -4,7 +4,14 @@ Ordered from newest (most features) to oldest (base).
 
 ## Branches (newest → oldest)
 
-### `claude/wave6-landing-page` — Latest, all features + landing page
+### `claude/tauri-desktop` — Tauri v2 desktop app (latest)
+```
+442c2bd feat: add Tauri v2 desktop app shell
+```
+Includes everything from wave6 + full Tauri scaffold with system tray,
+native file dialogs, notifications, and tauri-bridge.ts.
+
+### `claude/wave6-landing-page` — All features + landing page
 ```
 facc087 feat: landing page for early access signups
 ca1dc65 feat: keyboard shortcuts, error boundary for MVP readiness
@@ -50,7 +57,10 @@ ca1dc65 feat: keyboard shortcuts, error boundary for MVP readiness
 ## Quick Switch
 
 ```bash
-# Latest version (everything)
+# Latest version (everything + Tauri desktop)
+git checkout claude/tauri-desktop
+
+# Without Tauri (web only)
 git checkout claude/wave6-landing-page
 
 # Without landing page
@@ -78,6 +88,7 @@ git checkout claude/project-overview-plans-mfBo7
 
 | Branch | Key Feature |
 |--------|------------|
+| tauri-desktop | Tauri v2 desktop shell with system tray, native dialogs |
 | wave6-landing-page | Landing page at `/landing` for early access signups |
 | wave5-mvp-critical | Keyboard shortcuts (Ctrl+T/W/1-9), error boundary |
 | wave3-ui-features | Tab drag reorder, middle-click close, closeOthers |
