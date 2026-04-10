@@ -40,3 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /media/
+
+# tauri
+/src-tauri/target/
+/src-tauri/gen/
