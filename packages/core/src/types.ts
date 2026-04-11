@@ -63,7 +63,13 @@ export interface Message {
   id: string
   agentId: string
   role: "user" | "assistant" | "tool"
+  /** Clean display text — tool blocks are stripped at the store level */
   content: string
+  /** Parsed tool calls extracted from the raw response */
+  toolCalls?: ToolCall[]
+  /** True while a tool block is being streamed (show spinner) */
+  isToolStreaming?: boolean
+  /** Legacy: single tool call for role="tool" messages */
   toolCall?: ToolCall
   timestamp: number
 }

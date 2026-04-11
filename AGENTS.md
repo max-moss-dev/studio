@@ -36,3 +36,7 @@ Before working on gateway-related code, read the docs in `docs/`:
 - `packages/core/src/ws-client.ts` — WebSocket client
 - `packages/core/src/gateway-store.ts` — Zustand store (central state)
 - `packages/core/src/mock-gateway.ts` — mock mode for development
+
+## Tasks
+
+Active and planned work is tracked in [`TASKS.md`](./TASKS.md).

@@ -12,6 +12,7 @@ import type {
 import { WsClient } from "./ws-client"
 import { MockGateway } from "./mock-gateway"
 import { uid } from "./mock-data"
+import { VIEW_BUILDER_PROMPT } from "./prompts/view-builder"
 
 // --- Media Tool Proxy ---
 
@@ -53,8 +54,7 @@ Tasks (shared todo list):
 - todo.list: List all tasks
 - todo.complete: Mark a task done (params: id)
 
-Views (React components rendered in Sandpack iframe):
-- view.update: Update an AI-generated view's code (params: viewId, code). The code must import { useViewProps, send } from './bridge' and export default a React component. useViewProps() returns { agents, events, tasks, messages, models }. send(msg) sends GatewayMessages. You can use any npm package.
+${VIEW_BUILDER_PROMPT}
 
 Tips:
 - Use GFM markdown: tables, task lists (- [ ] / - [x]), code blocks, blockquotes
@@ -88,6 +88,46 @@ function parseToolCalls(text: string): Array<{ tool: string; params: Record<stri
     }
   }
   return results
+}
+
+/**
+ * Split raw message text into clean display content and structured tool calls.
+ * Called at the STORE level so React components never see raw tool blocks.
+ */
+function splitContentAndTools(rawText: string): {
+  content: string
+  toolCalls: Array<{ name: string; input: unknown }>
+  isToolStreaming: boolean
+} {
+  const toolCalls: Array<{ name: string; input: unknown }> = []
+  let isToolStreaming = false
+
+  // Split on tool block openings
+  const parts = rawText.split(/```tool\s*\n/)
+  let content = parts[0] // text before first tool block
+
+  for (let i = 1; i < parts.length; i++) {
+    const closeIdx = parts[i].indexOf("```")
+    if (closeIdx >= 0) {
+      // Complete tool block — parse it
+      const json = parts[i].slice(0, closeIdx).trim()
+      try {
+        const parsed = JSON.parse(json)
+        if (parsed.tool) {
+          toolCalls.push({ name: parsed.tool, input: parsed.params ?? {} })
+        }
+      } catch {
+        // Invalid JSON — skip
+      }
+      // Text after closing ``` goes back to content
+      content += parts[i].slice(closeIdx + 3)
+    } else {
+      // Incomplete tool block — still streaming
+      isToolStreaming = true
+    }
+  }
+
+  return { content: content.trim(), toolCalls, isToolStreaming }
 }
 
 // View store accessor — set lazily to avoid circular imports
@@ -600,20 +640,32 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
               .join("")
           } else if (typeof msgObj?.content === "string") {
             text = msgObj.content
+          } else if (typeof payload.text === "string") {
+            // Fallback: some gateway versions use payload.text directly
+            text = payload.text
+          } else if (typeof payload.content === "string") {
+            text = payload.content
           }
 
           if (agentId && text) {
+            // Split into clean content + tool calls at store level
+            const { content, toolCalls: parsedTools, isToolStreaming } = splitContentAndTools(text)
+
             set((s) => {
               const agentMsgs = s.messages[agentId] ?? []
               const existing = agentMsgs.find((m) => m.id === messageId)
+              const msgData = {
+                content,
+                toolCalls: parsedTools.length > 0 ? parsedTools : undefined,
+                isToolStreaming,
+              }
+
               if (existing) {
-                // For delta: replace entire content (gateway sends cumulative text)
-                // For final: set final content
                 return {
                   messages: {
                     ...s.messages,
                     [agentId]: agentMsgs.map((m) =>
-                      m.id === messageId ? { ...m, content: text } : m
+                      m.id === messageId ? { ...m, ...msgData } : m
                     ),
                   },
                 }
@@ -627,7 +679,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
                       id: messageId,
                       agentId,
                       role: "assistant" as const,
-                      content: text,
+                      ...msgData,
                       timestamp: msgObj?.timestamp ?? Date.now(),
                     },
                   ],
@@ -774,8 +826,58 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         break
       }
 
+      // Agent streaming events — real-time token-by-token updates
+      // Format: { runId, stream: "assistant", data: { text, delta }, sessionKey, seq }
+      case "agent": {
+        if (!payload?.data?.text || payload.stream !== "assistant") break
+        const agentId = extractAgentId(payload.sessionKey)
+        const messageId = payload.runId
+        const rawText = payload.data.text as string
+
+        if (agentId && messageId && rawText) {
+          // Split text into clean content + structured tool calls at store level
+          const { content, toolCalls, isToolStreaming } = splitContentAndTools(rawText)
+
+          set((s) => {
+            const agentMsgs = s.messages[agentId] ?? []
+            const existing = agentMsgs.find((m) => m.id === messageId)
+            const msgData = {
+              content,
+              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+              isToolStreaming,
+            }
+
+            if (existing) {
+              return {
+                messages: {
+                  ...s.messages,
+                  [agentId]: agentMsgs.map((m) =>
+                    m.id === messageId ? { ...m, ...msgData } : m
+                  ),
+                },
+              }
+            }
+            return {
+              messages: {
+                ...s.messages,
+                [agentId]: [
+                  ...agentMsgs,
+                  {
+                    id: messageId,
+                    agentId,
+                    role: "assistant" as const,
+                    ...msgData,
+                    timestamp: Date.now(),
+                  },
+                ],
+              },
+            }
+          })
+        }
+        break
+      }
+
       default: {
-        // Log unknown events for debugging, store as generic events
         console.log(`[OpenClaw Event] ${eventName}`, payload)
         const evt: AgentEvent = {
           id: uid(),

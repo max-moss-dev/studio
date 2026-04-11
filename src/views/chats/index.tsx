@@ -2,19 +2,18 @@
 
 import { useState, useRef, useEffect } from "react"
 import type { ViewProps, Agent, Message } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Send,
   Bot,
-  User,
   Wrench,
   ChevronDown,
   ChevronRight,
   Search,
   FileText,
+  Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uid } from "@/lib/mock-data"
@@ -47,96 +46,119 @@ function parseMediaPath(content: string): string | null {
   }
 }
 
-function ToolCallBlock({ message }: { message: Message }) {
+/** Tool call result block (role: "tool" messages) */
+function ToolResultBlock({ message }: { message: Message }) {
   const [expanded, setExpanded] = useState(false)
   const openTab = useTabStore((s) => s.openTab)
 
-  // Media tool result (no toolCall object, just content)
-  if (!message.toolCall) {
-    if (!message.content) return null
-
-    const filePath = parseMediaPath(message.content)
-
-    if (filePath) {
-      const fileName = filePath.split("/").pop() ?? filePath
-      return (
-        <div className="rounded-md border bg-muted/30 text-xs">
-          <button
-            onClick={() => openTab("media", `Media: ${fileName}`, "file-text", { path: filePath })}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-muted/50"
-          >
-            <FileText className="h-3 w-3 text-muted-foreground" />
-            <span className="font-medium">Open {fileName}</span>
-            <ChevronRight className="ml-auto h-3 w-3" />
-          </button>
-        </div>
-      )
-    }
-
+  const filePath = parseMediaPath(message.content)
+  if (filePath) {
+    const fileName = filePath.split("/").pop() ?? filePath
     return (
-      <div className="rounded-md border bg-muted/30 text-xs">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-muted/50"
-        >
-          <Wrench className="h-3 w-3 text-muted-foreground" />
-          <span className="font-medium">Tool Result</span>
-          {expanded ? (
-            <ChevronDown className="ml-auto h-3 w-3" />
-          ) : (
-            <ChevronRight className="ml-auto h-3 w-3" />
-          )}
-        </button>
-        {expanded && (
-          <div className="border-t px-3 py-2">
-            <pre className="rounded bg-background p-2 font-mono text-[11px] overflow-auto max-h-40 whitespace-pre-wrap">
-              {message.content}
-            </pre>
-          </div>
-        )}
-      </div>
+      <button
+        onClick={() => openTab("media", `Media: ${fileName}`, "file-text", { path: filePath })}
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-0.5"
+      >
+        <FileText className="h-3 w-3" />
+        <span>Opened {fileName}</span>
+        <ChevronRight className="h-3 w-3" />
+      </button>
     )
   }
 
   return (
-    <div className="rounded-md border bg-muted/30 text-xs">
+    <div className="text-xs">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-muted/50"
+        className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-0.5"
       >
-        <Wrench className="h-3 w-3 text-muted-foreground" />
-        <span className="font-medium">{message.toolCall.name}</span>
-        {expanded ? (
-          <ChevronDown className="ml-auto h-3 w-3" />
-        ) : (
-          <ChevronRight className="ml-auto h-3 w-3" />
-        )}
+        <Wrench className="h-3 w-3" />
+        <span>Tool result</span>
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
       </button>
       {expanded && (
-        <div className="border-t px-3 py-2 space-y-2">
-          <div>
-            <span className="text-muted-foreground">Input:</span>
-            <pre className="mt-1 rounded bg-background p-2 font-mono text-[11px] overflow-auto max-h-32">
-              {JSON.stringify(message.toolCall.input, null, 2)}
-            </pre>
-          </div>
-          {message.toolCall.output != null && (
-            <div>
-              <span className="text-muted-foreground">Output:</span>
-              <pre className="mt-1 rounded bg-background p-2 font-mono text-[11px] overflow-auto max-h-32">
-                {typeof message.toolCall.output === "string"
-                  ? message.toolCall.output
-                  : JSON.stringify(message.toolCall.output, null, 2)}
-              </pre>
-            </div>
-          )}
+        <pre className="mt-1 rounded bg-muted/50 p-2 font-mono text-[11px] overflow-auto max-h-40 whitespace-pre-wrap text-muted-foreground">
+          {message.content}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/** Inline tool call indicator (from parsed toolCalls on assistant messages) */
+function InlineToolCall({ name, input }: { name: string; input: unknown }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="text-xs">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-0.5"
+      >
+        <Wrench className="h-3 w-3" />
+        <span>{name}</span>
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+      {expanded && (
+        <pre className="mt-1 rounded bg-muted/50 p-2 font-mono text-[11px] overflow-auto max-h-32 text-muted-foreground">
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Single message row. Reads pre-parsed data from the store:
+ * - content: clean text (no tool blocks)
+ * - toolCalls: structured tool calls (already parsed)
+ * - isToolStreaming: true while a tool block is being streamed
+ * No regex or parsing happens here.
+ */
+function MessageRow({ msg }: { msg: Message }) {
+  // Tool result messages
+  if (msg.role === "tool") {
+    return <ToolResultBlock message={msg} />
+  }
+
+  // User messages
+  if (msg.role === "user") {
+    const displayText = msg.content.replace(/^\[System:[\s\S]*?\]\n\n/, '')
+    if (!displayText) return null
+    return (
+      <div className="py-2">
+        <p className="text-sm whitespace-pre-wrap">{displayText}</p>
+      </div>
+    )
+  }
+
+  // Assistant messages — data is pre-parsed at store level
+  const hasContent = msg.content.trim().length > 0
+  const hasTools = msg.toolCalls && msg.toolCalls.length > 0
+  if (!hasContent && !hasTools && !msg.isToolStreaming) return null
+
+  return (
+    <div className="py-2">
+      {hasContent && (
+        <MarkdownRenderer content={msg.content} className="text-sm" />
+      )}
+      {hasTools && (
+        <div className="mt-1 flex flex-col gap-0.5">
+          {msg.toolCalls!.map((tc, i) => (
+            <InlineToolCall key={i} name={tc.name} input={tc.input} />
+          ))}
+        </div>
+      )}
+      {msg.isToolStreaming && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1 mt-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Generating...</span>
         </div>
       )}
     </div>
   )
 }
 
-export default function ChatsView({ agents, messages, send, initialAgentId }: ViewProps & { initialAgentId?: string }) {
+export default function ChatsView({ agents, messages: _messages, send, initialAgentId }: ViewProps & { initialAgentId?: string }) {
   const openTab = useTabStore((s) => s.openTab)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     initialAgentId ?? agents[0]?.id ?? null
@@ -145,11 +167,14 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
   const [searchQuery, setSearchQuery] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const addMessage = useGatewayStore((s) => s.addMessage)
+  // Subscribe directly to store messages — ensures re-renders on every streaming delta
+  const storeMessages = useGatewayStore((s) => s.messages)
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId)
   const agentMessages = selectedAgentId
-    ? (messages[selectedAgentId] ?? [])
+    ? (storeMessages[selectedAgentId] ?? [])
     : []
+
 
   // Sort agents: online first, then by last message time
   const sortedAgents = [...agents].sort((a, b) => {
@@ -157,8 +182,8 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
     const bOnline = b.status !== "offline" ? 1 : 0
     if (aOnline !== bOnline) return bOnline - aOnline
 
-    const aLast = messages[a.id]?.at(-1)?.timestamp ?? 0
-    const bLast = messages[b.id]?.at(-1)?.timestamp ?? 0
+    const aLast = storeMessages[a.id]?.at(-1)?.timestamp ?? 0
+    const bLast = storeMessages[b.id]?.at(-1)?.timestamp ?? 0
     return bLast - aLast
   })
 
@@ -168,10 +193,11 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
       )
     : sortedAgents
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages or content changes (streaming)
+  const lastMsgContent = agentMessages[agentMessages.length - 1]?.content
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [agentMessages.length])
+  }, [agentMessages.length, lastMsgContent])
 
   function handleSend() {
     if (!inputText.trim() || !selectedAgentId) return
@@ -196,7 +222,7 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
   }
 
   function getLastMessage(agentId: string): string | null {
-    const msgs = messages[agentId]
+    const msgs = storeMessages[agentId]
     if (!msgs?.length) return null
     const last = msgs[msgs.length - 1]
     return last.content.slice(0, 50) + (last.content.length > 50 ? "..." : "")
@@ -303,70 +329,26 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-                {agentMessages.map((msg) => {
-                  if (msg.role === "tool") {
-                    return <div key={msg.id}><ToolCallBlock message={msg} /></div>
-                  }
-
-                  // Strip tool call blocks from assistant messages
-                  // Strip system prefix from user messages
-                  let displayText = msg.content
-                  if (msg.role === "assistant") {
-                    displayText = displayText.replace(/```tool\s*\n[\s\S]*?```/g, '').trim()
-                  } else if (msg.role === "user") {
-                    displayText = displayText.replace(/^\[System:[\s\S]*?\]\n\n/, '')
-                  }
-
-                  if (!displayText) return <div key={msg.id} />
+            <ScrollArea className="flex-1">
+              <div className="max-w-2xl mx-auto px-4 py-3">
+                {agentMessages.map((msg, idx) => {
+                  // Group consecutive messages by role — only show label on first
+                  const prevMsg = agentMessages[idx - 1]
+                  const showLabel = !prevMsg || prevMsg.role !== msg.role
 
                   return (
-                    <div key={msg.id}>
-                      <div
-                        className={cn(
-                          "flex gap-2",
-                          msg.role === "user" ? "flex-row-reverse" : "flex-row"
-                        )}
-                      >
-                        <div className="mt-1 shrink-0">
-                          {msg.role === "user" ? (
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20">
-                              <User className="h-3.5 w-3.5 text-primary" />
-                            </div>
-                          ) : (
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
-                              <Bot className="h-3.5 w-3.5" />
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className={cn(
-                            "max-w-[75%] px-3.5 py-2.5",
-                            msg.role === "user"
-                              ? "bg-[#528bff] text-white rounded-[12px] rounded-br-[4px]"
-                              : "bg-card border border-border rounded-[12px] rounded-bl-[4px]"
-                          )}
-                        >
-                          {msg.role === "assistant" ? (
-                            <MarkdownRenderer content={displayText} className="text-sm" />
-                          ) : (
-                            <p className="text-sm whitespace-pre-wrap">
-                              {displayText}
-                            </p>
-                          )}
-                          <span
-                            className={cn(
-                              "block text-[10px] mt-1",
-                              msg.role === "user"
-                                ? "text-white/50"
-                                : "text-muted-foreground"
-                            )}
-                          >
-                            {formatTime(msg.timestamp)}
+                    <div key={msg.id} className={cn(
+                      msg.role === "user" && "border-l-2 border-muted-foreground/20 pl-3",
+                      msg.role === "tool" && "pl-3",
+                    )}>
+                      {showLabel && msg.role !== "tool" && (
+                        <div className="flex items-center gap-1.5 pt-3 pb-0.5">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {msg.role === "user" ? "You" : selectedAgent?.name ?? "Agent"}
                           </span>
                         </div>
-                      </div>
+                      )}
+                      <MessageRow msg={msg} />
                     </div>
                   )
                 })}
@@ -374,9 +356,8 @@ export default function ChatsView({ agents, messages, send, initialAgentId }: Vi
 
                 {agentMessages.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                    <Bot className="h-8 w-8 mb-2" />
                     <p className="text-sm">
-                      Start a conversation with {selectedAgent.name}
+                      Start a conversation with {selectedAgent?.name}
                     </p>
                   </div>
                 )}

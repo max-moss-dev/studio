@@ -42,6 +42,36 @@ function ViewError({ message }: { message: string }) {
 }
 
 
+// Error feedback — debounced, sends view errors to most recent agent conversation
+let _viewErrorTimer: ReturnType<typeof setTimeout> | null = null
+function sendViewErrorToAgent(viewId: string, error: string, send: (msg: import("@/lib/types").GatewayMessage) => void) {
+  if (_viewErrorTimer) return
+  _viewErrorTimer = setTimeout(() => { _viewErrorTimer = null }, 5000)
+
+  const allMessages = useGatewayStore.getState().messages
+  let lastAgentId: string | null = null
+  let lastTimestamp = 0
+  for (const [agentId, msgs] of Object.entries(allMessages)) {
+    const last = msgs[msgs.length - 1]
+    if (last && last.timestamp > lastTimestamp) {
+      lastTimestamp = last.timestamp
+      lastAgentId = agentId
+    }
+  }
+
+  if (lastAgentId) {
+    const errorMsg = `[View Error in "${viewId}"]\n\n${error}\n\nPlease fix the view code using view.update.`
+    send({ type: "agent.message", agentId: lastAgentId, content: errorMsg })
+    useGatewayStore.getState().addMessage(lastAgentId, {
+      id: `err-${Date.now()}`,
+      agentId: lastAgentId,
+      role: "user",
+      content: errorMsg,
+      timestamp: Date.now(),
+    })
+  }
+}
+
 function ActiveView() {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const tabs = useTabStore((s) => s.tabs)
@@ -56,32 +86,25 @@ function ActiveView() {
   const viewProps = { agents, events, tasks, messages, send, models }
 
   // Built-in views
-  if (activeTab.viewId === "agent-manager") {
-    return <Suspense fallback={<ViewFallback />}><AgentManagerView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
-  }
-  if (activeTab.viewId === "kanban") {
-    return <Suspense fallback={<ViewFallback />}><KanbanView {...viewProps} /></Suspense>
-  }
-  if (activeTab.viewId === "chats") {
-    return <Suspense fallback={<ViewFallback />}><ChatsView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
-  }
-  if (activeTab.viewId === "office") {
-    return <Suspense fallback={<ViewFallback />}><OfficeView {...viewProps} /></Suspense>
-  }
-  if (activeTab.viewId === "settings") {
-    return <Suspense fallback={<ViewFallback />}><SettingsView /></Suspense>
-  }
-  if (activeTab.viewId === "view-picker") {
-    return <Suspense fallback={<ViewFallback />}><ViewPickerView /></Suspense>
-  }
-  if (activeTab.viewId === "media") {
-    return <Suspense fallback={<ViewFallback />}><MediaView initialPath={tabState.path as string} /></Suspense>
-  }
-  if (activeTab.viewId === "todo") {
-    return <Suspense fallback={<ViewFallback />}><TodoView /></Suspense>
-  }
-  if (activeTab.viewId === "code-editor") {
-    return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
+  switch (activeTab.viewId) {
+    case "agent-manager":
+      return <Suspense fallback={<ViewFallback />}><AgentManagerView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
+    case "kanban":
+      return <Suspense fallback={<ViewFallback />}><KanbanView {...viewProps} /></Suspense>
+    case "chats":
+      return <Suspense fallback={<ViewFallback />}><ChatsView {...viewProps} initialAgentId={tabState.agentId as string} /></Suspense>
+    case "office":
+      return <Suspense fallback={<ViewFallback />}><OfficeView {...viewProps} /></Suspense>
+    case "settings":
+      return <Suspense fallback={<ViewFallback />}><SettingsView /></Suspense>
+    case "view-picker":
+      return <Suspense fallback={<ViewFallback />}><ViewPickerView /></Suspense>
+    case "media":
+      return <Suspense fallback={<ViewFallback />}><MediaView initialPath={tabState.path as string} /></Suspense>
+    case "todo":
+      return <Suspense fallback={<ViewFallback />}><TodoView /></Suspense>
+    case "code-editor":
+      return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
   }
 
   // Custom/AI-generated views — render in Sandpack iframe
@@ -109,6 +132,7 @@ function ActiveView() {
             dependencies={viewDef.dependencies}
             viewProps={viewProps}
             onSend={send}
+            onError={(err) => sendViewErrorToAgent(activeTab.viewId, err, send)}
           />
         </div>
       </div>

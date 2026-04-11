@@ -33,7 +33,7 @@ export type ViewMessage =
  * - ViewBridge — wrapper component that manages the postMessage lifecycle
  */
 export const BRIDGE_SOURCE = `
-import { useState, useEffect, createContext, useContext, useCallback } from "react"
+import { useState, useEffect, createContext, useContext, useCallback, Component } from "react"
 
 const ViewContext = createContext(null)
 
@@ -45,6 +45,52 @@ export function useViewProps() {
 
 export function send(msg) {
   window.parent.postMessage({ type: "send", payload: msg }, "*")
+}
+
+function reportError(message, source) {
+  window.parent.postMessage({ type: "error", message: "[" + (source || "runtime") + "] " + message }, "*")
+}
+
+// Global error handlers — catch unhandled errors in the iframe
+window.onerror = function(message, source, lineno, colno) {
+  reportError(String(message) + " (line " + lineno + ")", "runtime")
+}
+window.onunhandledrejection = function(e) {
+  reportError(String(e.reason?.message || e.reason || "Unhandled promise rejection"), "async")
+}
+
+// Error boundary to catch React render errors
+export class ViewErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+  componentDidCatch(error, info) {
+    reportError(error.message + (info?.componentStack ? "\\n" + info.componentStack.split("\\n").slice(0, 3).join("\\n") : ""), "render")
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{
+          padding: 20,
+          color: "#e06c75",
+          fontFamily: "system-ui, sans-serif",
+          fontSize: 13,
+          background: "#282c34",
+          minHeight: "100vh",
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>View Error</div>
+          <pre style={{ whiteSpace: "pre-wrap", color: "#abb2bf", fontSize: 12 }}>
+            {this.state.error.message}
+          </pre>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 export function ViewBridge({ children }) {
@@ -91,13 +137,15 @@ export function ViewBridge({ children }) {
  * and wraps it in ViewBridge.
  */
 export const APP_WRAPPER_SOURCE = `
-import { ViewBridge } from "./bridge"
+import { ViewBridge, ViewErrorBoundary } from "./bridge"
 import View from "./view"
 
 export default function App() {
   return (
     <ViewBridge>
-      <View />
+      <ViewErrorBoundary>
+        <View />
+      </ViewErrorBoundary>
     </ViewBridge>
   )
 }

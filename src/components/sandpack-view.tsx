@@ -22,6 +22,7 @@ interface SandpackViewProps {
   dependencies?: Record<string, string>
   viewProps: Omit<ViewProps, "send">
   onSend?: (msg: import("@/lib/types").GatewayMessage) => void
+  onError?: (error: string) => void
 }
 
 /**
@@ -31,9 +32,11 @@ interface SandpackViewProps {
 function SandpackBridge({
   viewProps,
   onSend,
+  onError,
 }: {
   viewProps: Omit<ViewProps, "send">
   onSend?: (msg: import("@/lib/types").GatewayMessage) => void
+  onError?: (error: string) => void
 }) {
   const { sandpack } = useSandpack()
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -82,12 +85,13 @@ function SandpackBridge({
 
       if (msg.type === "error") {
         console.error("[SandpackView] View error:", msg.message)
+        onError?.(msg.message)
       }
     }
 
     window.addEventListener("message", handler)
     return () => window.removeEventListener("message", handler)
-  }, [onSend])
+  }, [onSend, onError])
 
   // Push prop updates to iframe
   useEffect(() => {
@@ -110,7 +114,7 @@ function SandpackBridge({
  * The view receives ViewProps via postMessage and can send
  * GatewayMessages back to the host.
  */
-export function SandpackView({ code, dependencies, viewProps, onSend }: SandpackViewProps) {
+export function SandpackView({ code, dependencies, viewProps, onSend, onError }: SandpackViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState(0)
 
@@ -202,7 +206,7 @@ export function SandpackView({ code, dependencies, viewProps, onSend }: Sandpack
           },
         }}
       >
-        <SandpackBridge viewProps={viewProps} onSend={onSend} />
+        <SandpackBridge viewProps={viewProps} onSend={onSend} onError={onError} />
         <SandpackPreview
           showOpenInCodeSandbox={false}
           showRefreshButton={false}
