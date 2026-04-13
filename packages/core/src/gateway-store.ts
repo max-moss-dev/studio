@@ -8,6 +8,10 @@ import type {
   Message,
   GatewayMessage,
   GatewayEvent,
+  OpenCodeAgentConfig,
+  OpenCodeModelInfo,
+  ProviderSource,
+  ChatSession,
 } from "./types"
 import { WsClient } from "./ws-client"
 import { MockGateway } from "./mock-gateway"
@@ -384,10 +388,12 @@ interface GatewayState {
   events: AgentEvent[]
   tasks: Task[]
   messages: Record<string, Message[]>
+  sessions: ChatSession[]
 
   // Extra data
   models: string[]
-  sessions: unknown[]
+  opencodeModels: OpenCodeModelInfo[]
+  opencodeSessions: unknown[]
   presence: Record<string, unknown>
 
   // Actions
@@ -398,6 +404,13 @@ interface GatewayState {
   send: (msg: GatewayMessage) => void
   sendToGateway: (method: string, params?: Record<string, unknown>) => Promise<unknown>
   addMessage: (agentId: string, message: Message) => void
+  fetchOpenCodeAgents: (serverUrl: string) => Promise<void>
+  createOpenCodeAgent: (serverUrl: string, config: OpenCodeAgentConfig) => Promise<void>
+  fetchOpenCodeModels: (serverUrl: string) => Promise<void>
+  // Session management
+  createSession: (agentId: string, title?: string) => string
+  deleteSession: (sessionId: string) => void
+  updateSession: (sessionId: string, updates: Partial<ChatSession>) => void
 }
 
 let wsClient: WsClient | null = null
@@ -459,12 +472,23 @@ export function loadPersistedConfig(): {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function agentEntryToAgent(entry: any): Agent {
+  // Handle model that could be a string or an object
+  let modelStr = "unknown"
+  const rawModel = entry.model
+  if (typeof rawModel === "string") {
+    modelStr = rawModel
+  } else if (rawModel && typeof rawModel === "object") {
+    modelStr = rawModel.primary ?? rawModel.modelID ?? rawModel.id ??
+               (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
+               "unknown"
+  }
+
   return {
     id: entry.id ?? entry.agentId ?? uid(),
     name: entry.identity?.name ?? entry.name ?? entry.id,
     status: "offline",
     role: mapSessionRole(entry),
-    model: typeof entry.model === "string" ? entry.model : entry.model?.primary ?? entry.model?.id ?? "unknown",
+    model: modelStr,
     currentTask: null,
     tokensToday: 0,
     tokensTotal: 0,
@@ -479,12 +503,24 @@ function agentEntryToAgent(entry: any): Agent {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function sessionToAgent(session: any): Agent {
+  // Handle model that could be a string or an object with providerID/modelID
+  let modelStr = "unknown"
+  const rawModel = session.model ?? session.agent?.model
+  if (typeof rawModel === "string") {
+    modelStr = rawModel
+  } else if (rawModel && typeof rawModel === "object") {
+    // Handle {providerID, modelID} or {primary, id, ...} structures
+    modelStr = rawModel.primary ?? rawModel.modelID ?? rawModel.id ??
+               (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
+               "unknown"
+  }
+
   return {
     id: session.id ?? session.sessionKey ?? uid(),
     name: session.name ?? session.label ?? session.id ?? "Agent",
     status: mapSessionStatus(session.status ?? session.state),
     role: mapSessionRole(session),
-    model: (typeof session.model === "string" ? session.model : session.model?.primary ?? session.agent?.model?.primary ?? session.model?.id ?? session.agent?.model ?? "unknown") as string,
+    model: modelStr,
     currentTask: session.currentTask ?? session.lastMessage?.content?.slice(0, 80) ?? null,
     tokensToday: session.metrics?.tokensToday ?? session.usage?.tokens ?? 0,
     tokensTotal: session.metrics?.tokensTotal ?? session.usage?.totalTokens ?? 0,
@@ -522,6 +558,14 @@ function mapSessionRole(session: any): Agent["role"] {
   if (role.includes("review")) return "reviewer"
   if (role.includes("research")) return "researcher"
   return "custom"
+}
+
+function mapOpenCodeMode(mode: string): Agent["role"] {
+  switch (mode) {
+    case "primary": return "orchestrator"
+    case "subagent": return "custom"
+    default: return "custom"
+  }
 }
 
 /**
@@ -1097,7 +1141,9 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const agentEntries = (agentsRes as any)?.agents ?? []
       const agents = agentEntries.map(agentEntryToAgent)
-      set({ agents })
+      set((s) => ({
+        agents: [...s.agents.filter((a) => a.provider === "opencode"), ...agents]
+      }))
 
       // Fetch sessions and aggregate token usage per agent
       try {
@@ -1177,9 +1223,11 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     events: [],
     tasks: [],
     messages: {},
-    sessions: [],
+    sessions: loadPersistedSessions(),
     presence: {},
     models: [] as string[],
+    opencodeModels: [] as OpenCodeModelInfo[],
+    opencodeSessions: [],
 
     clearError() {
       set({ connectionError: null })
@@ -1275,7 +1323,25 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           break
 
         case "agent.create": {
-          // agents.create accepts: workspace (required), name
+          const createMsg = msg as { type: "agent.create"; config: Partial<Agent>; provider?: ProviderSource; opencodeConfig?: OpenCodeAgentConfig }
+          if (createMsg.provider === "opencode" && createMsg.opencodeConfig) {
+            // Route to OpenCode proxy
+            try {
+              const providers = typeof window !== "undefined"
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ? (JSON.parse(localStorage.getItem("studio-providers") ?? "{}") as any)
+                : {}
+              const serverUrl = providers?.opencode?.url ?? "http://localhost:4096"
+              get().createOpenCodeAgent(serverUrl, createMsg.opencodeConfig).catch((e: unknown) => {
+                console.error("[Gateway] OpenCode agent.create failed:", e)
+              })
+            } catch (e) {
+              console.error("[Gateway] OpenCode agent.create failed:", e)
+            }
+            break
+          }
+
+          // OpenClaw: agents.create accepts: workspace (required), name
           const cfg = msg.config ?? {}
           const agentName = cfg.name ?? "agent"
           const params: Record<string, unknown> = {
@@ -1285,7 +1351,6 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           if (cfg.name) params.name = cfg.name
 
           wsClient.request("agents.create", params).then(() => {
-            // Refetch full agent list to get complete data including model
             fetchInitialData()
           }).catch((e) => {
             const msg = e?.message ?? (typeof e === "object" ? JSON.stringify(e) : String(e))
@@ -1340,12 +1405,188 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       return wsClient.request(method, params)
     },
 
+    async fetchOpenCodeAgents(serverUrl: string) {
+      try {
+        const res = await fetch("/api/agent/opencode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+          body: JSON.stringify({ action: "agents" }),
+        })
+        if (!res.ok) throw new Error(`Failed to fetch agents: ${res.status}`)
+        const data = await res.json()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const agentList = Array.isArray(data) ? data : data.agents ?? data.data ?? []
+
+        // Create a default agent if no agents exist
+        let finalAgentList = agentList
+        if (agentList.length === 0) {
+          // Create a default agent
+          const defaultAgent = {
+            name: "assistant",
+            description: "General purpose coding assistant",
+            mode: "primary",
+            prompt: "You are a helpful coding assistant.",
+          }
+          try {
+            const createRes = await fetch("/api/agent/opencode", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+              body: JSON.stringify({ action: "create-agent", agent: defaultAgent }),
+            })
+            if (createRes.ok) {
+              // Re-fetch to get the newly created agent
+              const refetchRes = await fetch("/api/agent/opencode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+                body: JSON.stringify({ action: "agents" }),
+              })
+              if (refetchRes.ok) {
+                const refetchData = await refetchRes.json()
+                finalAgentList = Array.isArray(refetchData) ? refetchData : refetchData.agents ?? refetchData.data ?? []
+              }
+            }
+          } catch (err) {
+            console.error("[Gateway] Failed to create default agent:", err)
+          }
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const opencodeAgents: Agent[] = finalAgentList.map((a: any) => {
+          // Handle model that could be a string or an object
+          let modelStr = "unknown"
+          if (typeof a.model === "string") {
+            modelStr = a.model
+          } else if (a.model && typeof a.model === "object") {
+            modelStr = a.model.primary ?? a.model.modelID ?? a.model.id ??
+                       (a.model.providerID && a.model.modelID ? `${a.model.providerID}/${a.model.modelID}` : null) ??
+                       "unknown"
+          }
+
+          return {
+            id: `opencode-${a.name ?? a.id ?? uid()}`,
+            name: a.name ?? a.id ?? "Agent",
+            status: ("online" as Agent["status"]),
+            role: mapOpenCodeMode(a.mode),
+            model: modelStr,
+            currentTask: null,
+            tokensToday: 0,
+            tokensTotal: 0,
+            uptime: 0,
+            config: a,
+            provider: "opencode" as const,
+          }
+        })
+
+        set((s) => {
+          const existing = s.agents.filter((a) => a.provider !== "opencode")
+          return { agents: [...existing, ...opencodeAgents] }
+        })
+      } catch (err) {
+        console.error("[Gateway] fetchOpenCodeAgents failed:", err)
+      }
+    },
+
+    async createOpenCodeAgent(serverUrl: string, config: OpenCodeAgentConfig) {
+      try {
+        const res = await fetch("/api/agent/opencode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+          body: JSON.stringify({ action: "create-agent", agent: config }),
+        })
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error(errData.error ?? `Failed to create agent: ${res.status}`)
+        }
+        // Re-fetch agents to include the newly created one
+        await get().fetchOpenCodeAgents(serverUrl)
+      } catch (err) {
+        console.error("[Gateway] createOpenCodeAgent failed:", err)
+        throw err
+      }
+    },
+
+    async fetchOpenCodeModels(serverUrl: string) {
+      try {
+        const res = await fetch("/api/agent/opencode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+          body: JSON.stringify({ action: "models" }),
+        })
+        if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`)
+        const data = await res.json()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const providers = data.providers ?? data.data ?? []
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const defaults = data.default ?? data.defaults ?? {}
+        const models: OpenCodeModelInfo[] = []
+        for (const p of providers) {
+          const pId = p.id ?? p.providerID ?? p.name
+          const pModels = p.models ?? p.modelIDs ?? []
+          // Handle case where pModels is an object like { providerID, modelIDs: [...] }
+          const modelList = Array.isArray(pModels) ? pModels : (pModels.modelIDs ?? [])
+          for (const m of modelList) {
+            const mId = typeof m === "string" ? m : m.id ?? m.modelID ?? m.name
+            models.push({
+              providerId: pId,
+              modelId: mId,
+              label: typeof m === "string" ? `${pId}/${m}` : (m.name ?? mId),
+            })
+          }
+          // Also add the default model for this provider
+          const defaultModel = defaults[pId]
+          if (defaultModel && !models.some((x) => x.modelId === defaultModel && x.providerId === pId)) {
+            models.push({
+              providerId: pId,
+              modelId: defaultModel,
+              label: `${pId}/${defaultModel} (default)`,
+            })
+          }
+        }
+        set({ opencodeModels: models })
+      } catch (err) {
+        console.error("[Gateway] fetchOpenCodeModels failed:", err)
+      }
+    },
+
     addMessage(agentId: string, message: Message) {
       set((s) => ({
         messages: {
           ...s.messages,
           [agentId]: [...(s.messages[agentId] ?? []), message],
         },
+      }))
+    },
+
+    createSession(agentId: string, title?: string) {
+      const sessionId = `session-${uid()}`
+      const agent = get().agents.find((a) => a.id === agentId)
+      const sessionTitle = title ?? `Chat with ${agent?.name ?? "Agent"}`
+      const now = Date.now()
+      const newSession: ChatSession = {
+        id: sessionId,
+        agentId,
+        title: sessionTitle,
+        createdAt: now,
+        updatedAt: now,
+        messageCount: 0,
+      }
+      set((s) => ({
+        sessions: [newSession, ...s.sessions],
+      }))
+      return sessionId
+    },
+
+    deleteSession(sessionId: string) {
+      set((s) => ({
+        sessions: s.sessions.filter((sesh) => sesh.id !== sessionId),
+      }))
+    },
+
+    updateSession(sessionId: string, updates: Partial<ChatSession>) {
+      set((s) => ({
+        sessions: s.sessions.map((sesh) =>
+          sesh.id === sessionId ? { ...sesh, ...updates } : sesh
+        ),
       }))
     },
   }
@@ -1359,3 +1600,30 @@ useGatewayStore.subscribe((state, prev) => {
     _persistTimer = setTimeout(() => persistMessages(state.messages), 500)
   }
 })
+
+// Persist sessions on change
+const SESSIONS_KEY = "openclaw-sessions"
+let _sessionsPersistTimer: ReturnType<typeof setTimeout> | null = null
+useGatewayStore.subscribe((state, prev) => {
+  if (state.sessions !== prev.sessions) {
+    if (_sessionsPersistTimer) clearTimeout(_sessionsPersistTimer)
+    _sessionsPersistTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(state.sessions))
+      } catch {
+        // ignore
+      }
+    }, 500)
+  }
+})
+
+// Load persisted sessions on init (if any)
+function loadPersistedSessions(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {
+    // ignore
+  }
+  return []
+}

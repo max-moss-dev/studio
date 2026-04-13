@@ -10,7 +10,10 @@ import { NextRequest } from "next/server"
  * - { action: "create", model? }                → create session
  * - { action: "prompt", sessionId, content }    → send message (streaming SSE)
  * - { action: "messages", sessionId }           → get session messages
- * - { action: "abort", sessionId }              → abort session
+ * - { action: "abort", sessionId }               → abort session
+ * - { action: "agents" }                        → list configured agents
+ * - { action: "create-agent", agent }            → create agent via config patch
+ * - { action: "models" }                        → list providers & default models
  */
 
 const DEFAULT_URL = "http://localhost:4096"
@@ -63,7 +66,6 @@ export async function POST(request: NextRequest) {
       }
 
       case "prompt": {
-        // Stream the response back as SSE
         const res = await fetch(`${baseUrl}/session/${body.sessionId}/message`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -75,10 +77,8 @@ export async function POST(request: NextRequest) {
           return Response.json({ error: text }, { status: res.status })
         }
 
-        // Return the response directly (may be streaming or JSON)
         const contentType = res.headers.get("content-type") ?? ""
         if (contentType.includes("text/event-stream")) {
-          // Forward SSE stream
           return new Response(res.body, {
             headers: {
               "Content-Type": "text/event-stream",
@@ -88,6 +88,56 @@ export async function POST(request: NextRequest) {
           })
         }
 
+        return Response.json(await res.json())
+      }
+
+      case "agents": {
+        const res = await fetch(`${baseUrl}/agent`)
+        if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`)
+        const data = await res.json()
+        return Response.json(data)
+      }
+
+      case "create-agent": {
+        // OpenCode agents are config-based. Patch /config to add the agent definition.
+        const agentConfig = body.agent
+        if (!agentConfig?.name) {
+          return Response.json({ error: "Agent name is required" }, { status: 400 })
+        }
+
+        // Build the agent config object for OpenCode
+        const agentDef: Record<string, unknown> = {
+          description: agentConfig.description ?? "",
+          mode: agentConfig.mode ?? "primary",
+        }
+        if (agentConfig.model) agentDef.model = agentConfig.model
+        if (agentConfig.prompt) agentDef.prompt = agentConfig.prompt
+        if (agentConfig.temperature != null) agentDef.temperature = agentConfig.temperature
+        if (agentConfig.steps != null) agentDef.steps = agentConfig.steps
+        if (agentConfig.color) agentDef.color = agentConfig.color
+        if (agentConfig.hidden != null) agentDef.hidden = agentConfig.hidden
+        if (agentConfig.permission) agentDef.permission = agentConfig.permission
+
+        const configPatch = { agent: { [agentConfig.name]: agentDef } }
+
+        const res = await fetch(`${baseUrl}/config`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(configPatch),
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          return Response.json({ error: `Failed to create agent: ${text}` }, { status: res.status })
+        }
+
+        const updatedConfig = await res.json()
+        return Response.json({ ok: true, config: updatedConfig })
+      }
+
+      case "models": {
+        const res = await fetch(`${baseUrl}/config/providers`)
+        if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`)
         return Response.json(await res.json())
       }
 

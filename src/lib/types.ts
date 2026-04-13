@@ -3,6 +3,10 @@ export type {
   Agent,
   AgentStatus,
   AgentRole,
+  ProviderSource,
+  OpenCodeAgentMode,
+  OpenCodeAgentConfig,
+  OpenCodeModelInfo,
   AgentEvent,
   AgentEventType,
   Task,
@@ -14,4 +18,5 @@ export type {
   ViewProps,
   GatewayMessage,
   GatewayEvent,
+  ChatSession,
 } from "@studio/core"

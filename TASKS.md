@@ -7,11 +7,20 @@ Track ongoing and planned work across the Studio project.
 - [ ] Build View Builder — code editor + embedded chat + live Sandpack preview
 
 ## Backlog
-
+- Запамятати дані входу в openclaw gateway для натсупних разів
 - Помилка канбан view при створенні таску (tasks.create — INVALID_REQUEST unknown method)
 - При перезавантаженні сторінки, потрібен час на завантадження всіх вкладок
+- Agent edit/update UI (configure model, role, workspace after creation)
 
 ## Completed (this session)
+
+- [x] Provider-aware agent creation — Agent Manager now supports both OpenClaw and OpenCode
+- [x] Added `ProviderSource`, `OpenCodeAgentConfig`, `OpenCodeModelInfo` types
+- [x] Extended `Agent.provider` field to track which gateway an agent comes from
+- [x] OpenCode proxy: added `agents`, `create-agent`, `models` actions to `/api/agent/opencode`
+- [x] Gateway store: added `fetchOpenCodeAgents`, `createOpenCodeAgent`, `fetchOpenCodeModels`, `opencodeModels` state
+- [x] Agent Manager rewrite: provider picker dialog, dual creation forms (OpenClaw + OpenCode), provider badges/filters
+- [x] Auto-fetch OpenCode agents + models in app-shell on connect
 
 - [x] Chrome-style tabs — shrink instead of scroll, no horizontal scrollbar
 - [x] Chat scroll — instant jump to bottom on open, smooth scroll on new messages only

@@ -11,6 +11,7 @@ export function useGateway() {
   const mockMode = useGatewayStore((s) => s.mockMode)
   const send = useGatewayStore((s) => s.send)
   const models = useGatewayStore((s) => s.models)
+  const opencodeModels = useGatewayStore((s) => s.opencodeModels)
 
-  return { agents, events, tasks, messages, connected, mockMode, send, models }
+  return { agents, events, tasks, messages, connected, mockMode, send, models, opencodeModels }
 }

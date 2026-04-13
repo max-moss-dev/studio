@@ -8,6 +8,8 @@ export type AgentRole =
   | "researcher"
   | "custom"
 
+export type ProviderSource = "openclaw" | "opencode"
+
 export interface Agent {
   id: string
   name: string
@@ -17,8 +19,28 @@ export interface Agent {
   currentTask: string | null
   tokensToday: number
   tokensTotal: number
-  uptime: number // seconds
+  uptime: number
   config: Record<string, unknown>
+  provider?: ProviderSource
+}
+
+export type OpenCodeAgentMode = "primary" | "subagent"
+
+export interface OpenCodeAgentConfig {
+  name: string
+  description: string
+  mode: OpenCodeAgentMode
+  model?: string
+  prompt?: string
+  permission?: {
+    edit?: "ask" | "allow" | "deny"
+    bash?: "ask" | "allow" | "deny" | Record<string, "ask" | "allow" | "deny">
+    webfetch?: "ask" | "allow" | "deny"
+  }
+  temperature?: number
+  steps?: number
+  color?: string
+  hidden?: boolean
 }
 
 // ── Events ────────────────────────────────────────────
@@ -52,6 +74,16 @@ export interface Task {
   updatedAt: number
 }
 
+// ── Sessions ──────────────────────────────────────────
+export interface ChatSession {
+  id: string
+  agentId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+}
+
 // ── Messages ──────────────────────────────────────────
 export interface ToolCall {
   name: string
@@ -62,6 +94,7 @@ export interface ToolCall {
 export interface Message {
   id: string
   agentId: string
+  sessionId?: string
   role: "user" | "assistant" | "tool"
   /** Clean display text — tool blocks are stripped at the store level */
   content: string
@@ -104,23 +137,29 @@ export interface ViewDefinition {
   sourceEntry?: string // entry filename, e.g. "view.tsx"
 }
 
+export interface OpenCodeModelInfo {
+  providerId: string
+  modelId: string
+  label: string
+}
+
 export interface ViewProps {
   agents: Agent[]
   events: AgentEvent[]
   tasks: Task[]
   messages: Record<string, Message[]>
   models: string[]
+  opencodeModels: OpenCodeModelInfo[]
   send: (msg: GatewayMessage) => void
 }
 
 // ── Gateway Protocol ──────────────────────────────────
 export type GatewayMessage =
-  // Client → Gateway
   | { type: "subscribe"; channels: string[] }
   | { type: "ping" }
   | { type: "agent.command"; agentId: string; command: string }
   | { type: "agent.message"; agentId: string; content: string }
-  | { type: "agent.create"; config: Partial<Agent> }
+  | { type: "agent.create"; config: Partial<Agent> & { opencodeConfig?: OpenCodeAgentConfig }; provider?: ProviderSource }
   | { type: "agent.update"; agentId: string; config: Partial<Agent> }
   | { type: "agent.delete"; agentId: string }
   | { type: "task.create"; title: string; assigneeId?: string }

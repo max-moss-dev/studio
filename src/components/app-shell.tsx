@@ -78,13 +78,13 @@ function ActiveView() {
   const tabs = useTabStore((s) => s.tabs)
   const openTab = useTabStore((s) => s.openTab)
   const views = useViewStore((s) => s.views)
-  const { agents, events, tasks, messages, send, models } = useGateway()
+  const { agents, events, tasks, messages, send, models, opencodeModels } = useGateway()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab) return null
 
   const tabState = activeTab.state ?? {}
-  const viewProps = { agents, events, tasks, messages, send, models }
+  const viewProps = { agents, events, tasks, messages, send, models, opencodeModels }
 
   // Built-in views
   switch (activeTab.viewId) {
@@ -287,37 +287,29 @@ export function AppShell() {
 
   // Auto-connect on mount from persisted config (multi-provider aware)
   useEffect(() => {
-    // Try multi-provider config first
     const providers = loadProviders()
     const hasAnyEnabled = Object.values(providers).some((p) => p.enabled)
 
     if (hasAnyEnabled) {
-      // OpenClaw takes priority for real WS connection
       if (providers.openclaw.enabled && providers.openclaw.url?.trim()) {
         connectGateway(providers.openclaw.url.trim(), providers.openclaw.apiKey ?? "")
-      } else if (providers.opencode.enabled) {
-        // OpenCode only — use mock mode for gateway store (chat goes through OpenCode API)
-        connectMock()
+      }
+
+      // Fetch OpenCode agents if OpenCode is enabled
+      if (providers.opencode.enabled && providers.opencode.url?.trim()) {
+        const store = useGatewayStore.getState()
+        store.fetchOpenCodeAgents(providers.opencode.url.trim())
+        store.fetchOpenCodeModels(providers.opencode.url.trim())
       }
       return
     }
 
-    // Fallback: legacy single-provider config
-    const config = loadPersistedConfig()
-    if (config) {
-      if (config.mockMode) {
-        connectMock()
-      } else if (config.url) {
-        connectGateway(config.url, config.apiKey)
-      }
+    // No auto-connect fallback — user must explicitly connect via settings
+    const existing = tabs.find((t) => t.viewId === "settings")
+    if (existing) {
+      setActiveTab(existing.id)
     } else {
-      // No persisted config — open settings tab
-      const existing = tabs.find((t) => t.viewId === "settings")
-      if (existing) {
-        setActiveTab(existing.id)
-      } else {
-        openTab("settings", "Settings", "settings")
-      }
+      openTab("settings", "Settings", "settings")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

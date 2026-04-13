@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, memo } from "react"
-import type { ViewProps, Agent, Message } from "@/lib/types"
+import type { ViewProps, Agent, Message, ChatSession } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -14,7 +14,25 @@ import {
   Search,
   FileText,
   Loader2,
+  Plus,
+  MessageSquare,
+  MoreHorizontal,
+  Trash2,
+  X,
 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { uid } from "@/lib/mock-data"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
@@ -36,6 +54,14 @@ function formatTime(ts: number): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function formatDate(ts: number): string {
+  const date = new Date(ts)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) return formatTime(ts)
+  return date.toLocaleDateString([], { month: "short", day: "numeric" })
 }
 
 function parseMediaPath(content: string): string | null {
@@ -125,7 +151,7 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
 
   // User messages — right-aligned with subtle background
   if (msg.role === "user") {
-    const displayText = msg.content.replace(/^\[System:[\s\S]*?\]\n\n/, '')
+    const displayText = msg.content.replace(/^\[System:[\s\S]*?\]\n\n/, "")
     if (!displayText) return null
     return (
       <div className="py-2 flex justify-end">
@@ -178,82 +204,136 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
 
 export default function ChatsView({ agents, messages: _messages, send, initialAgentId }: ViewProps & { initialAgentId?: string }) {
   const openTab = useTabStore((s) => s.openTab)
-  // Pick initial agent: explicit initialAgentId > last active (from localStorage) > first with messages > first agent
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
-    if (initialAgentId) return initialAgentId
+  
+  // Session management
+  const sessions = useGatewayStore((s) => s.sessions)
+  const createSession = useGatewayStore((s) => s.createSession)
+  const deleteSession = useGatewayStore((s) => s.deleteSession)
+  const updateSession = useGatewayStore((s) => s.updateSession)
+  const addMessage = useGatewayStore((s) => s.addMessage)
+  const storeMessages = useGatewayStore((s) => s.messages)
+  
+  // Selected session state - use valid sessions only
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
+    // Try to restore last session from localStorage
     try {
-      const saved = localStorage.getItem("openclaw-last-chat-agent")
-      if (saved && agents.some((a) => a.id === saved)) return saved
+      const saved = localStorage.getItem("openclaw-last-session")
+      if (saved && sessions.some((s) => s.id === saved)) return saved
     } catch { /* ignore */ }
-    return agents[0]?.id ?? null
+    return sessions[0]?.id ?? null
   })
+  
   const [inputText, setInputText] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
+  const [newSessionTitle, setNewSessionTitle] = useState("")
+  const [selectedAgentForNewSession, setSelectedAgentForNewSession] = useState<string | null>(null)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const addMessage = useGatewayStore((s) => s.addMessage)
-  // Subscribe to store messages
-  const storeMessages = useGatewayStore((s) => s.messages)
-  const agentMessages = selectedAgentId
-    ? (storeMessages[selectedAgentId] ?? EMPTY_MESSAGES)
+
+  // Get selected session and its agent
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId)
+  const selectedAgent = selectedSession
+    ? agents.find((a) => a.id === selectedSession.agentId)
+    : null
+
+  // Get messages for selected session (filter by sessionId if present, else by agentId for backwards compat)
+  const sessionMessages = selectedSession
+    ? (storeMessages[selectedSession.agentId]?.filter(
+        (m) => !m.sessionId || m.sessionId === selectedSession.id
+      ) ?? EMPTY_MESSAGES)
     : EMPTY_MESSAGES
 
-  const selectedAgent = agents.find((a) => a.id === selectedAgentId)
+  // Sort sessions by last activity (updatedAt)
+  const sortedSessions = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
 
+  // Filter to only show sessions with valid agents
+  const validSessions = sortedSessions.filter((s) => agents.some((a) => a.id === s.agentId))
 
-  // Sort agents: online first, then by last message time
-  const sortedAgents = [...agents].sort((a, b) => {
-    const aOnline = a.status !== "offline" ? 1 : 0
-    const bOnline = b.status !== "offline" ? 1 : 0
-    if (aOnline !== bOnline) return bOnline - aOnline
-
-    const aLast = storeMessages[a.id]?.at(-1)?.timestamp ?? 0
-    const bLast = storeMessages[b.id]?.at(-1)?.timestamp ?? 0
-    return bLast - aLast
-  })
-
-  const filteredAgents = searchQuery
-    ? sortedAgents.filter((a) =>
-        a.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredSessions = searchQuery
+    ? validSessions.filter((s) =>
+        s.title.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : sortedAgents
+    : validSessions
 
-  // Persist last active agent
+  // Persist last active session
   useEffect(() => {
-    if (selectedAgentId) {
-      try { localStorage.setItem("openclaw-last-chat-agent", selectedAgentId) } catch { /* ignore */ }
+    if (selectedSessionId) {
+      try { localStorage.setItem("openclaw-last-session", selectedSessionId) } catch { /* ignore */ }
     }
-  }, [selectedAgentId])
+  }, [selectedSessionId])
 
-  // Scroll: jump to bottom instantly on initial load / agent switch,
-  // smooth scroll only on new messages after that
+  // Auto-select first session if none selected
+  useEffect(() => {
+    if (!selectedSessionId && sessions.length > 0) {
+      setSelectedSessionId(sessions[0].id)
+    }
+  }, [selectedSessionId, sessions])
+
+  // Create initial session if none exists and agents are available
+  useEffect(() => {
+    if (agents.length === 0) return
+    
+    // Check if there are any sessions with valid agents
+    const hasValidSession = sessions.some((s) => agents.some((a) => a.id === s.agentId))
+    
+    if (!hasValidSession) {
+      // Create default session with first agent
+      const firstOnlineAgent = agents.find((a) => a.status !== "offline") ?? agents[0]
+      if (firstOnlineAgent) {
+        const sessionId = createSession(firstOnlineAgent.id, `Chat with ${firstOnlineAgent.name}`)
+        setSelectedSessionId(sessionId)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents.length])
+
+  // Scroll behavior
   const prevMsgCountRef = useRef<number>(0)
   const isInitialRef = useRef(true)
 
-  // On initial load or agent switch — jump to bottom instantly (no animation)
   useEffect(() => {
     isInitialRef.current = true
     prevMsgCountRef.current = 0
-  }, [selectedAgentId])
+  }, [selectedSessionId])
 
   useEffect(() => {
     if (isInitialRef.current) {
-      // Instant jump on first render / agent switch
       messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
       isInitialRef.current = false
-      prevMsgCountRef.current = agentMessages.length
+      prevMsgCountRef.current = sessionMessages.length
       return
     }
-    if (agentMessages.length > prevMsgCountRef.current) {
+    if (sessionMessages.length > prevMsgCountRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }
-    prevMsgCountRef.current = agentMessages.length
-  }, [agentMessages.length])
+    prevMsgCountRef.current = sessionMessages.length
+  }, [sessionMessages.length])
 
   // OpenCode session tracking (persisted across renders)
   const opencodeSessionRef = useRef<string | null>(null)
 
+  function handleCreateNewSession() {
+    if (!selectedAgentForNewSession) return
+    const title = newSessionTitle.trim() || undefined
+    const sessionId = createSession(selectedAgentForNewSession, title)
+    setSelectedSessionId(sessionId)
+    setShowNewSessionDialog(false)
+    setNewSessionTitle("")
+    setSelectedAgentForNewSession(null)
+  }
+
+  function handleDeleteSession(e: React.MouseEvent, sessionId: string) {
+    e.stopPropagation()
+    deleteSession(sessionId)
+    if (selectedSessionId === sessionId) {
+      const remaining = sessions.filter((s) => s.id !== sessionId)
+      setSelectedSessionId(remaining[0]?.id ?? null)
+    }
+  }
+
   async function handleSend() {
-    if (!inputText.trim() || !selectedAgentId) return
+    if (!inputText.trim() || !selectedSession || !selectedAgent) return
 
     const content = inputText.trim()
     setInputText("")
@@ -261,29 +341,36 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
     // Add user message locally
     const userMsg: Message = {
       id: uid(),
-      agentId: selectedAgentId,
+      agentId: selectedAgent.id,
+      sessionId: selectedSession.id,
       role: "user",
       content,
       timestamp: Date.now(),
     }
-    addMessage(selectedAgentId, userMsg)
+    addMessage(selectedAgent.id, userMsg)
+    
+    // Update session message count
+    updateSession(selectedSession.id, {
+      messageCount: (selectedSession.messageCount || 0) + 1,
+      updatedAt: Date.now(),
+    })
 
     // Check if OpenCode is enabled — route through OpenCode API
     const providers = loadProviders()
     if (providers.opencode.enabled && providers.opencode.url) {
-      await sendViaOpenCode(selectedAgentId, content, providers.opencode.url)
+      await sendViaOpenCode(selectedAgent.id, content, providers.opencode.url, selectedSession.id)
       return
     }
 
     // Default: send to gateway (OpenClaw / mock)
     send({
       type: "agent.message",
-      agentId: selectedAgentId,
+      agentId: selectedAgent.id,
       content,
     })
   }
 
-  async function sendViaOpenCode(agentId: string, content: string, serverUrl: string) {
+  async function sendViaOpenCode(agentId: string, content: string, serverUrl: string, _sessionId: string) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "x-opencode-url": serverUrl,
@@ -317,6 +404,7 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
         addMessage(agentId, {
           id: uid(),
           agentId,
+          sessionId: _sessionId,
           role: "assistant",
           content: `Failed to create OpenCode session: ${err instanceof Error ? err.message : String(err)}`,
           timestamp: Date.now(),
@@ -325,10 +413,13 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       }
     }
 
-    const sessionId = opencodeSessionRef.current
-    if (!sessionId) {
+    const openCodeSessionId = opencodeSessionRef.current
+    if (!openCodeSessionId) {
       addMessage(agentId, {
-        id: uid(), agentId, role: "assistant",
+        id: uid(),
+        agentId,
+        sessionId: _sessionId,
+        role: "assistant",
         content: "No OpenCode session available.",
         timestamp: Date.now(),
       })
@@ -340,6 +431,7 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
     addMessage(agentId, {
       id: assistantMsgId,
       agentId,
+      sessionId: _sessionId,
       role: "assistant",
       content: "",
       isStreaming: true,
@@ -351,13 +443,16 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       const res = await fetch("/api/agent/opencode", {
         method: "POST",
         headers,
-        body: JSON.stringify({ action: "prompt", sessionId, content }),
+        body: JSON.stringify({ action: "prompt", sessionId: openCodeSessionId, content }),
       })
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
         useGatewayStore.getState().addMessage(agentId, {
-          id: assistantMsgId, agentId, role: "assistant",
+          id: assistantMsgId,
+          agentId,
+          sessionId: _sessionId,
+          role: "assistant",
           content: `OpenCode error: ${errData.error ?? errData.details ?? "Unknown error"}`,
           timestamp: Date.now(),
         })
@@ -425,7 +520,7 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
         const msgsRes = await fetch("/api/agent/opencode", {
           method: "POST",
           headers,
-          body: JSON.stringify({ action: "messages", sessionId }),
+          body: JSON.stringify({ action: "messages", sessionId: openCodeSessionId }),
         })
         const msgsData = await msgsRes.json()
         const msgList = Array.isArray(msgsData) ? msgsData : msgsData.messages ?? Object.values(msgsData)
@@ -463,23 +558,42 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
     }
   }
 
-  function getLastMessage(agentId: string): string | null {
-    const msgs = storeMessages[agentId]
+  function getLastMessagePreview(session: ChatSession): string | null {
+    const msgs = storeMessages[session.agentId]
     if (!msgs?.length) return null
-    const last = msgs[msgs.length - 1]
-    return last.content.slice(0, 50) + (last.content.length > 50 ? "..." : "")
+    // Filter messages for this session
+    const sessionMsgs = msgs.filter((m) => !m.sessionId || m.sessionId === session.id)
+    if (!sessionMsgs.length) return null
+    const last = sessionMsgs[sessionMsgs.length - 1]
+    return last.content.slice(0, 60) + (last.content.length > 60 ? "..." : "")
   }
 
   return (
     <div className="flex h-full">
-      {/* Agent sidebar */}
-      <div className="w-64 border-r flex flex-col">
-        <div className="px-3 py-2">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-2">Conversations</h3>
+      {/* Sessions sidebar */}
+      <div className="w-72 border-r flex flex-col">
+        <div className="px-3 py-3 border-b">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">Chat Sessions</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => {
+                setSelectedAgentForNewSession(null)
+                setNewSessionTitle("")
+                setShowNewSessionDialog(true)
+              }}
+              disabled={agents.length === 0}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New
+            </Button>
+          </div>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search agents..."
+              placeholder="Search sessions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-8 pl-8 text-xs"
@@ -487,64 +601,103 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
           </div>
         </div>
         <ScrollArea className="flex-1">
-          <div className="flex flex-col">
-            {filteredAgents.map((agent) => {
-              const lastMsg = getLastMessage(agent.id)
-              const isActive = agent.id === selectedAgentId
+          <div className="flex flex-col py-1">
+            {filteredSessions.map((session) => {
+              const agent = agents.find((a) => a.id === session.agentId)
+              const lastMsg = getLastMessagePreview(session)
+              const isActive = session.id === selectedSessionId
               return (
-                <button
-                  key={agent.id}
-                  onClick={() => setSelectedAgentId(agent.id)}
+                <div
+                  key={session.id}
+                  onClick={() => setSelectedSessionId(session.id)}
                   className={cn(
-                    "flex items-start gap-3 px-3 py-2.5 text-left transition-colors cursor-pointer",
+                    "flex items-start gap-3 px-3 py-3 text-left transition-colors cursor-pointer group",
                     isActive
                       ? "bg-accent"
                       : "hover:bg-accent/50"
                   )}
                 >
-                  <div className="relative mt-0.5">
+                  <div className="relative mt-0.5 shrink-0">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                      {agent.name.slice(0, 2)}
+                      <MessageSquare className="h-3.5 w-3.5" />
                     </div>
-                    <span
-                      className={cn(
-                        "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card",
-                        STATUS_DOT[agent.status]
-                      )}
-                    />
+                    {agent && (
+                      <span
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card",
+                          STATUS_DOT[agent.status]
+                        )}
+                      />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate">
-                        {agent.name}
+                        {session.title}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">
+                        {formatDate(session.updatedAt)}
                       </span>
                     </div>
+                    {agent && (
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        with {agent.name}
+                      </p>
+                    )}
                     {lastMsg ? (
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
                         {lastMsg}
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground/50 italic mt-0.5">
-                        No messages
+                        No messages yet
                       </p>
                     )}
                   </div>
-                </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <div
+                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded hover:bg-accent cursor-pointer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </div>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={(e) => handleDeleteSession(e, session.id)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               )
             })}
+            {filteredSessions.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 px-4 text-muted-foreground">
+                <MessageSquare className="h-8 w-8 mb-2 opacity-50" />
+                <p className="text-sm">No sessions yet</p>
+                <p className="text-xs text-center mt-1">
+                  Click "New" to start chatting with an agent
+                </p>
+              </div>
+            )}
           </div>
         </ScrollArea>
       </div>
 
       {/* Chat area */}
       <div className="flex flex-1 flex-col">
-        {selectedAgent ? (
+        {selectedAgent && selectedSession ? (
           <>
             {/* Chat header */}
             <div className="flex items-center gap-3 border-b px-4 py-2.5">
               <div className="relative">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                  {selectedAgent.name.slice(0, 2)}
+                  <MessageSquare className="h-3.5 w-3.5" />
                 </div>
                 <span
                   className={cn(
@@ -553,10 +706,10 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
                   )}
                 />
               </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium">{selectedAgent.name}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{selectedSession.title}</div>
                 <div className="text-xs text-muted-foreground">
-                  {selectedAgent.role} · {selectedAgent.model}
+                  {selectedAgent.name} · {selectedAgent.role} · {selectedAgent.model}
                 </div>
               </div>
               <Button
@@ -566,16 +719,16 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
                 onClick={() => openTab("agent-manager", `Agent: ${selectedAgent.name}`, "bot", { agentId: selectedAgent.id })}
               >
                 <Bot className="h-3.5 w-3.5" />
-                Config
+                Agent
               </Button>
             </div>
 
             {/* Messages */}
             <ScrollArea className="flex-1">
               <div className="max-w-2xl mx-auto px-4 py-3">
-                {agentMessages.map((msg, idx) => {
+                {sessionMessages.map((msg, idx) => {
                   // Group consecutive messages by role — only show label on first
-                  const prevMsg = agentMessages[idx - 1]
+                  const prevMsg = sessionMessages[idx - 1]
                   const showLabel = !prevMsg || prevMsg.role !== msg.role
 
                   return (
@@ -595,10 +748,13 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
                 })}
                 <div ref={messagesEndRef} />
 
-                {agentMessages.length === 0 && (
+                {sessionMessages.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                     <p className="text-sm">
-                      Start a conversation with {selectedAgent?.name}
+                      Start a conversation in {selectedSession.title}
+                    </p>
+                    <p className="text-xs mt-2 text-muted-foreground/50">
+                      Messages will appear here
                     </p>
                   </div>
                 )}
@@ -632,10 +788,120 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
           </>
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            <p className="text-sm">Select an agent to start chatting</p>
+            <div className="text-center">
+              <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-sm">
+                {agents.length === 0
+                  ? "No agents available. Connect to a gateway first."
+                  : "Select or create a session to start chatting"}
+              </p>
+              {agents.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => setShowNewSessionDialog(true)}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Chat Session
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      {/* New Session Dialog */}
+      <Dialog open={showNewSessionDialog} onOpenChange={setShowNewSessionDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Chat Session</DialogTitle>
+            <DialogDescription>
+              Select an agent to chat with and optionally name your session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* Agent selection */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Agent</label>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {agents.map((agent) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => setSelectedAgentForNewSession(agent.id)}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-lg border text-left transition-all",
+                      selectedAgentForNewSession === agent.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    <div className="relative shrink-0">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                        {agent.name.slice(0, 2)}
+                      </div>
+                      <span
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-card",
+                          STATUS_DOT[agent.status]
+                        )}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{agent.name}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {agent.role}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {agents.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No agents available. Connect to a gateway first.
+                </p>
+              )}
+            </div>
+
+            {/* Session title input */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Session Title <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <Input
+                placeholder="e.g., Code Review, Debug Session..."
+                value={newSessionTitle}
+                onChange={(e) => setNewSessionTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && selectedAgentForNewSession) {
+                    handleCreateNewSession()
+                  }
+                }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 justify-end pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowNewSessionDialog(false)
+                  setSelectedAgentForNewSession(null)
+                  setNewSessionTitle("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateNewSession}
+                disabled={!selectedAgentForNewSession}
+              >
+                Start Chat
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

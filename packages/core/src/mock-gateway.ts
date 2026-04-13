@@ -72,7 +72,7 @@ export class MockGateway {
 
       case "agent.create": {
         const newAgent: Agent = {
-          id: `agent-${uid()}`,
+          id: msg.provider === "opencode" ? `opencode-${uid()}` : `agent-${uid()}`,
           name: msg.config.name ?? "New Agent",
           status: "online",
           role: msg.config.role ?? "custom",
@@ -82,6 +82,7 @@ export class MockGateway {
           tokensTotal: 0,
           uptime: 0,
           config: {},
+          provider: msg.provider,
           ...msg.config,
         } as Agent
         this.agents.push(newAgent)
