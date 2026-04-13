@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
 import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/stores/gateway-store"
+import { loadProviders } from "@/lib/providers"
 import { useGateway } from "@/hooks/use-gateway"
 import { Loader2, AlertTriangle, Radio, Code } from "lucide-react"
 import { SandpackView } from "@/components/sandpack-view"
@@ -220,7 +221,11 @@ function ConnectionErrorBanner() {
 function Footer() {
   const connected = useGatewayStore((s) => s.connected)
   const mockMode = useGatewayStore((s) => s.mockMode)
+  const url = useGatewayStore((s) => s.url)
   const error = useGatewayStore((s) => s.connectionError)
+
+  const providers = loadProviders()
+  const enabledIds = (Object.keys(providers) as Array<"openclaw" | "opencode">).filter((id) => providers[id].enabled)
 
   const statusColor = error
     ? "text-[#e06c75]"
@@ -228,13 +233,20 @@ function Footer() {
       ? "text-[#98c379]"
       : "text-muted-foreground"
 
-  const statusText = error
-    ? error.code.replace(/_/g, " ").toLowerCase()
-    : connected
-      ? mockMode
-        ? "mock://localhost"
-        : "ws://localhost:18789"
-      : "disconnected"
+  let statusText: string
+  if (error) {
+    statusText = error.code.replace(/_/g, " ").toLowerCase()
+  } else if (connected) {
+    if (enabledIds.length > 0) {
+      statusText = enabledIds.join(" + ")
+    } else if (mockMode) {
+      statusText = "mock://localhost"
+    } else {
+      statusText = url || "connected"
+    }
+  } else {
+    statusText = "disconnected"
+  }
 
   return (
     <footer className="flex h-7 items-center justify-between border-t bg-header-bg px-4 shrink-0">
@@ -268,12 +280,29 @@ export function AppShell() {
   useEffect(() => {
     setViewStoreAccessors(
       (view) => registerView(view as unknown as import("@/lib/types").ViewDefinition),
-      (id) => getView(id) as Record<string, unknown> | undefined
+      (id) => getView(id) as Record<string, unknown> | undefined,
+      (viewId, title, icon) => openTab(viewId, title, icon)
     )
-  }, [registerView, getView])
+  }, [registerView, getView, openTab])
 
-  // Auto-connect on mount from persisted config
+  // Auto-connect on mount from persisted config (multi-provider aware)
   useEffect(() => {
+    // Try multi-provider config first
+    const providers = loadProviders()
+    const hasAnyEnabled = Object.values(providers).some((p) => p.enabled)
+
+    if (hasAnyEnabled) {
+      // OpenClaw takes priority for real WS connection
+      if (providers.openclaw.enabled && providers.openclaw.url?.trim()) {
+        connectGateway(providers.openclaw.url.trim(), providers.openclaw.apiKey ?? "")
+      } else if (providers.opencode.enabled) {
+        // OpenCode only — use mock mode for gateway store (chat goes through OpenCode API)
+        connectMock()
+      }
+      return
+    }
+
+    // Fallback: legacy single-provider config
     const config = loadPersistedConfig()
     if (config) {
       if (config.mockMode) {

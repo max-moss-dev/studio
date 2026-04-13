@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, memo } from "react"
 import type { ViewProps, Agent, Message } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +20,9 @@ import { uid } from "@/lib/mock-data"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
+import { loadProviders } from "@/lib/providers"
+
+const EMPTY_MESSAGES: Message[] = []
 
 const STATUS_DOT: Record<string, string> = {
   online: "bg-[#98c379]",
@@ -114,19 +117,21 @@ function InlineToolCall({ name, input }: { name: string; input: unknown }) {
  * - isToolStreaming: true while a tool block is being streamed
  * No regex or parsing happens here.
  */
-function MessageRow({ msg }: { msg: Message }) {
+const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
   // Tool result messages
   if (msg.role === "tool") {
     return <ToolResultBlock message={msg} />
   }
 
-  // User messages
+  // User messages — right-aligned with subtle background
   if (msg.role === "user") {
     const displayText = msg.content.replace(/^\[System:[\s\S]*?\]\n\n/, '')
     if (!displayText) return null
     return (
-      <div className="py-2">
-        <p className="text-sm whitespace-pre-wrap">{displayText}</p>
+      <div className="py-2 flex justify-end">
+        <div className="bg-[#2c313a] rounded-lg px-3 py-2 max-w-[85%]">
+          <p className="text-sm whitespace-pre-wrap">{displayText}</p>
+        </div>
       </div>
     )
   }
@@ -134,12 +139,12 @@ function MessageRow({ msg }: { msg: Message }) {
   // Assistant messages — data is pre-parsed at store level
   const hasContent = msg.content.trim().length > 0
   const hasTools = msg.toolCalls && msg.toolCalls.length > 0
-  if (!hasContent && !hasTools && !msg.isToolStreaming) return null
+  if (!hasContent && !hasTools && !msg.isToolStreaming && !msg.isStreaming) return null
 
   return (
     <div className="py-2">
       {hasContent && (
-        <MarkdownRenderer content={msg.content} className="text-sm" />
+        <MarkdownRenderer content={msg.content} className="text-sm" streaming={msg.isStreaming} />
       )}
       {hasTools && (
         <div className="mt-1 flex flex-col gap-0.5">
@@ -151,29 +156,48 @@ function MessageRow({ msg }: { msg: Message }) {
       {msg.isToolStreaming && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground py-1 mt-1">
           <Loader2 className="h-3 w-3 animate-spin" />
-          <span>Generating...</span>
+          <span>
+            {msg.streamingToolName
+              ? `Calling ${msg.streamingToolName}...`
+              : "Preparing tool call..."}
+          </span>
         </div>
+      )}
+      {msg.isStreaming && !msg.isToolStreaming && !hasContent && !hasTools && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Thinking...</span>
+        </div>
+      )}
+      {msg.isStreaming && !msg.isToolStreaming && hasContent && (
+        <span className="inline-block w-1.5 h-4 bg-[#61afef] animate-pulse rounded-sm ml-0.5 align-text-bottom" />
       )}
     </div>
   )
-}
+})
 
 export default function ChatsView({ agents, messages: _messages, send, initialAgentId }: ViewProps & { initialAgentId?: string }) {
   const openTab = useTabStore((s) => s.openTab)
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
-    initialAgentId ?? agents[0]?.id ?? null
-  )
+  // Pick initial agent: explicit initialAgentId > last active (from localStorage) > first with messages > first agent
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
+    if (initialAgentId) return initialAgentId
+    try {
+      const saved = localStorage.getItem("openclaw-last-chat-agent")
+      if (saved && agents.some((a) => a.id === saved)) return saved
+    } catch { /* ignore */ }
+    return agents[0]?.id ?? null
+  })
   const [inputText, setInputText] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const addMessage = useGatewayStore((s) => s.addMessage)
-  // Subscribe directly to store messages — ensures re-renders on every streaming delta
+  // Subscribe to store messages
   const storeMessages = useGatewayStore((s) => s.messages)
+  const agentMessages = selectedAgentId
+    ? (storeMessages[selectedAgentId] ?? EMPTY_MESSAGES)
+    : EMPTY_MESSAGES
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId)
-  const agentMessages = selectedAgentId
-    ? (storeMessages[selectedAgentId] ?? [])
-    : []
 
 
   // Sort agents: online first, then by last message time
@@ -193,32 +217,250 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       )
     : sortedAgents
 
-  // Auto-scroll on new messages or content changes (streaming)
-  const lastMsgContent = agentMessages[agentMessages.length - 1]?.content
+  // Persist last active agent
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [agentMessages.length, lastMsgContent])
+    if (selectedAgentId) {
+      try { localStorage.setItem("openclaw-last-chat-agent", selectedAgentId) } catch { /* ignore */ }
+    }
+  }, [selectedAgentId])
 
-  function handleSend() {
+  // Scroll: jump to bottom instantly on initial load / agent switch,
+  // smooth scroll only on new messages after that
+  const prevMsgCountRef = useRef<number>(0)
+  const isInitialRef = useRef(true)
+
+  // On initial load or agent switch — jump to bottom instantly (no animation)
+  useEffect(() => {
+    isInitialRef.current = true
+    prevMsgCountRef.current = 0
+  }, [selectedAgentId])
+
+  useEffect(() => {
+    if (isInitialRef.current) {
+      // Instant jump on first render / agent switch
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+      isInitialRef.current = false
+      prevMsgCountRef.current = agentMessages.length
+      return
+    }
+    if (agentMessages.length > prevMsgCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+    prevMsgCountRef.current = agentMessages.length
+  }, [agentMessages.length])
+
+  // OpenCode session tracking (persisted across renders)
+  const opencodeSessionRef = useRef<string | null>(null)
+
+  async function handleSend() {
     if (!inputText.trim() || !selectedAgentId) return
+
+    const content = inputText.trim()
+    setInputText("")
 
     // Add user message locally
     const userMsg: Message = {
       id: uid(),
       agentId: selectedAgentId,
       role: "user",
-      content: inputText.trim(),
+      content,
       timestamp: Date.now(),
     }
     addMessage(selectedAgentId, userMsg)
 
-    // Send to gateway
+    // Check if OpenCode is enabled — route through OpenCode API
+    const providers = loadProviders()
+    if (providers.opencode.enabled && providers.opencode.url) {
+      await sendViaOpenCode(selectedAgentId, content, providers.opencode.url)
+      return
+    }
+
+    // Default: send to gateway (OpenClaw / mock)
     send({
       type: "agent.message",
       agentId: selectedAgentId,
-      content: inputText.trim(),
+      content,
     })
-    setInputText("")
+  }
+
+  async function sendViaOpenCode(agentId: string, content: string, serverUrl: string) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-opencode-url": serverUrl,
+    }
+
+    // Create session if we don't have one
+    if (!opencodeSessionRef.current) {
+      try {
+        const res = await fetch("/api/agent/opencode", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ action: "create" }),
+        })
+        const data = await res.json()
+        opencodeSessionRef.current = data.id ?? data.sessionId ?? Object.keys(data)[0]
+        if (!opencodeSessionRef.current) {
+          // Try to get from session list
+          const listRes = await fetch("/api/agent/opencode", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ action: "sessions" }),
+          })
+          const sessions = await listRes.json()
+          const list = Array.isArray(sessions) ? sessions : sessions.sessions ?? Object.values(sessions)
+          if (list.length > 0) {
+            const last = list[list.length - 1]
+            opencodeSessionRef.current = typeof last === "string" ? last : last.id ?? last.sessionId
+          }
+        }
+      } catch (err) {
+        addMessage(agentId, {
+          id: uid(),
+          agentId,
+          role: "assistant",
+          content: `Failed to create OpenCode session: ${err instanceof Error ? err.message : String(err)}`,
+          timestamp: Date.now(),
+        })
+        return
+      }
+    }
+
+    const sessionId = opencodeSessionRef.current
+    if (!sessionId) {
+      addMessage(agentId, {
+        id: uid(), agentId, role: "assistant",
+        content: "No OpenCode session available.",
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    // Add "thinking" placeholder
+    const assistantMsgId = uid()
+    addMessage(agentId, {
+      id: assistantMsgId,
+      agentId,
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      timestamp: Date.now(),
+    })
+
+    // Send prompt
+    try {
+      const res = await fetch("/api/agent/opencode", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "prompt", sessionId, content }),
+      })
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        useGatewayStore.getState().addMessage(agentId, {
+          id: assistantMsgId, agentId, role: "assistant",
+          content: `OpenCode error: ${errData.error ?? errData.details ?? "Unknown error"}`,
+          timestamp: Date.now(),
+        })
+        return
+      }
+
+      // Check if streaming
+      const contentType = res.headers.get("content-type") ?? ""
+      if (contentType.includes("text/event-stream") && res.body) {
+        // Read SSE stream
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let fullText = ""
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+
+          // Parse SSE events
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6)
+              if (data === "[DONE]") continue
+              try {
+                const event = JSON.parse(data)
+                // Extract text from various event formats
+                const text = event.content ?? event.text ?? event.delta?.text ?? event.message?.content ?? ""
+                if (text) {
+                  fullText += text
+                  // Update message in store
+                  useGatewayStore.setState((s) => ({
+                    messages: {
+                      ...s.messages,
+                      [agentId]: (s.messages[agentId] ?? []).map((m) =>
+                        m.id === assistantMsgId
+                          ? { ...m, content: fullText, isStreaming: true }
+                          : m
+                      ),
+                    },
+                  }))
+                }
+              } catch { /* skip non-JSON lines */ }
+            }
+          }
+        }
+
+        // Mark as done
+        useGatewayStore.setState((s) => ({
+          messages: {
+            ...s.messages,
+            [agentId]: (s.messages[agentId] ?? []).map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, isStreaming: false }
+                : m
+            ),
+          },
+        }))
+      } else {
+        // Non-streaming: read full response, then poll messages
+        const responseData = await res.json()
+
+        // Wait a bit for OpenCode to process, then fetch messages
+        await new Promise((r) => setTimeout(r, 1000))
+        const msgsRes = await fetch("/api/agent/opencode", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ action: "messages", sessionId }),
+        })
+        const msgsData = await msgsRes.json()
+        const msgList = Array.isArray(msgsData) ? msgsData : msgsData.messages ?? Object.values(msgsData)
+
+        // Find last assistant message
+        const lastAssistant = [...msgList].reverse().find(
+          (m: { role?: string }) => m.role === "assistant"
+        )
+
+        const responseText = lastAssistant?.content
+          ?? (typeof responseData === "string" ? responseData : JSON.stringify(responseData, null, 2))
+
+        useGatewayStore.setState((s) => ({
+          messages: {
+            ...s.messages,
+            [agentId]: (s.messages[agentId] ?? []).map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: responseText, isStreaming: false }
+                : m
+            ),
+          },
+        }))
+      }
+    } catch (err) {
+      useGatewayStore.setState((s) => ({
+        messages: {
+          ...s.messages,
+          [agentId]: (s.messages[agentId] ?? []).map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: `OpenCode error: ${err instanceof Error ? err.message : String(err)}`, isStreaming: false }
+              : m
+          ),
+        },
+      }))
+    }
   }
 
   function getLastMessage(agentId: string): string | null {
@@ -338,13 +580,12 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
 
                   return (
                     <div key={msg.id} className={cn(
-                      msg.role === "user" && "border-l-2 border-muted-foreground/20 pl-3",
                       msg.role === "tool" && "pl-3",
                     )}>
-                      {showLabel && msg.role !== "tool" && (
+                      {showLabel && msg.role !== "tool" && msg.role !== "user" && (
                         <div className="flex items-center gap-1.5 pt-3 pb-0.5">
                           <span className="text-xs font-medium text-muted-foreground">
-                            {msg.role === "user" ? "You" : selectedAgent?.name ?? "Agent"}
+                            {selectedAgent?.name ?? "Agent"}
                           </span>
                         </div>
                       )}

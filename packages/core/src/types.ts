@@ -69,6 +69,10 @@ export interface Message {
   toolCalls?: ToolCall[]
   /** True while a tool block is being streamed (show spinner) */
   isToolStreaming?: boolean
+  /** Name of tool currently being streamed (e.g. "media.list") */
+  streamingToolName?: string | null
+  /** True while the message is still receiving streaming tokens */
+  isStreaming?: boolean
   /** Legacy: single tool call for role="tool" messages */
   toolCall?: ToolCall
   timestamp: number

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Layers, Wifi, WifiOff, X, Plus, LogOut, Users } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Layers, Wifi, WifiOff, X, Plus, LogOut, Users, Zap, Terminal } from "lucide-react"
 import {
   Bot,
   Kanban,
@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
 import { cn } from "@/lib/utils"
+import { loadProviders, type ProviderId } from "@/lib/providers"
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   bot: Bot,
@@ -31,6 +32,73 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   "file-text": FileText,
   "check-circle": CheckCircle,
   code: Code,
+}
+
+const PROVIDER_META: Record<ProviderId, { icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = {
+  openclaw: { icon: Zap, color: "#61afef", label: "OpenClaw" },
+  opencode: { icon: Terminal, color: "#e5c07b", label: "OpenCode" },
+}
+
+function ProviderBadges({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const connected = useGatewayStore((s) => s.connected)
+  const mockMode = useGatewayStore((s) => s.mockMode)
+  // Defer localStorage read to client to avoid SSR hydration mismatch
+  const [enabled, setEnabled] = useState<ProviderId[]>([])
+  const [providers, setProviders] = useState(() => loadProviders())
+  useEffect(() => {
+    const p = loadProviders()
+    setProviders(p)
+    setEnabled((Object.keys(p) as ProviderId[]).filter((id) => p[id].enabled))
+  }, [connected])
+
+  // If no providers enabled, show generic status
+  if (enabled.length === 0) {
+    return (
+      <Badge
+        variant={connected ? "default" : "secondary"}
+        className="gap-1.5 text-xs cursor-pointer hover:opacity-80"
+        onClick={onOpenSettings}
+      >
+        {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+        {connected ? (mockMode ? "Mock Mode" : "Connected") : "Disconnected"}
+      </Badge>
+    )
+  }
+
+  // Show a badge per enabled provider
+  return (
+    <div className="flex items-center gap-1">
+      {enabled.map((id) => {
+        const meta = PROVIDER_META[id]
+        const Icon = meta.icon
+        const isActive = id === "openclaw" ? (connected && !mockMode) : !!providers[id].apiKey?.trim()
+        return (
+          <button
+            key={id}
+            onClick={onOpenSettings}
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium cursor-pointer hover:opacity-80 transition-opacity"
+            style={{
+              backgroundColor: `${meta.color}20`,
+              color: meta.color,
+            }}
+            title={`${meta.label} — ${isActive ? "connected" : "configured"}`}
+          >
+            <Icon className="h-3 w-3" style={{ color: meta.color }} />
+            {meta.label}
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: isActive ? meta.color : "#5c6370" }}
+            />
+          </button>
+        )
+      })}
+      {connected && mockMode && (
+        <Badge variant="secondary" className="gap-1 text-[10px] cursor-pointer" onClick={onOpenSettings}>
+          Mock
+        </Badge>
+      )}
+    </div>
+  )
 }
 
 export function Header() {
@@ -86,7 +154,7 @@ export function Header() {
       </button>
 
       {/* Tabs — draggable for reorder */}
-      <div className="flex items-center flex-1 h-full overflow-x-auto">
+      <div className="flex items-center flex-1 h-full overflow-hidden min-w-0">
         {tabs.map((tab, idx) => {
           const Icon = ICON_MAP[tab.icon ?? ""] ?? Sparkles
           const isActive = tab.id === activeTabId
@@ -113,7 +181,7 @@ export function Header() {
                 setDragOverIdx(null)
               }}
               className={cn(
-                "group relative flex h-full items-center gap-1.5 px-[22px] text-xs font-medium transition-colors cursor-pointer shrink-0",
+                "group relative flex h-full items-center gap-1.5 px-3 text-xs font-medium transition-colors cursor-pointer min-w-0",
                 isActive
                   ? "bg-background text-foreground"
                   : "text-muted-foreground hover:text-secondary-foreground",
@@ -121,7 +189,7 @@ export function Header() {
               )}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="max-w-[140px] truncate">{tab.title}</span>
+              <span className="truncate">{tab.title}</span>
               {tabs.length > 1 && (
                 <span
                   role="button"
@@ -151,7 +219,7 @@ export function Header() {
         </button>
       </div>
 
-      {/* Right side — status + agent count + logout */}
+      {/* Right side — provider badges + agent count + logout */}
       <div className="flex items-center gap-2 px-3 shrink-0">
         {connected && agents.length > 0 && (
           <div className="flex items-center gap-1.5 rounded-xl bg-[#3e4451] px-2.5 py-0.5">
@@ -159,22 +227,9 @@ export function Header() {
             <span className="text-xs text-muted-foreground">{agents.length} Agent{agents.length !== 1 ? "s" : ""}</span>
           </div>
         )}
-        <Badge
-          variant={connected ? "default" : "secondary"}
-          className="gap-1.5 text-xs cursor-pointer hover:opacity-80"
-          onClick={handleOpenSettings}
-        >
-          {connected ? (
-            <Wifi className="h-3 w-3" />
-          ) : (
-            <WifiOff className="h-3 w-3" />
-          )}
-          {connected
-            ? mockMode
-              ? "Mock Mode"
-              : "Connected"
-            : "Disconnected"}
-        </Badge>
+
+        <ProviderBadges onOpenSettings={handleOpenSettings} />
+
         {connected && (
           <button
             onClick={() => {

@@ -40,3 +40,9 @@ Before working on gateway-related code, read the docs in `docs/`:
 ## Tasks
 
 Active and planned work is tracked in [`TASKS.md`](./TASKS.md).
+
+**Agents must keep `TASKS.md` up to date at all times.** Specifically:
+- Move items to **In Progress** when you start working on them.
+- Move items to **Completed** (with `[x]`) when done.
+- Add new tasks to **Backlog** whenever you identify work that needs doing.
+- Record significant architecture decisions under **Key Architecture Decisions**.

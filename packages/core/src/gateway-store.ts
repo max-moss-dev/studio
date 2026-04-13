@@ -98,9 +98,12 @@ function splitContentAndTools(rawText: string): {
   content: string
   toolCalls: Array<{ name: string; input: unknown }>
   isToolStreaming: boolean
+  /** Name of tool currently being streamed (extracted from partial JSON) */
+  streamingToolName: string | null
 } {
   const toolCalls: Array<{ name: string; input: unknown }> = []
   let isToolStreaming = false
+  let streamingToolName: string | null = null
 
   // Split on tool block openings
   const parts = rawText.split(/```tool\s*\n/)
@@ -124,28 +127,56 @@ function splitContentAndTools(rawText: string): {
     } else {
       // Incomplete tool block — still streaming
       isToolStreaming = true
+      // Try to extract tool name from partial JSON: {"tool": "media.list"...
+      const nameMatch = parts[i].match(/"tool"\s*:\s*"([^"]+)"/)
+      if (nameMatch) {
+        streamingToolName = nameMatch[1]
+      }
     }
   }
 
-  return { content: content.trim(), toolCalls, isToolStreaming }
+  return { content: content.trim(), toolCalls, isToolStreaming, streamingToolName }
 }
 
 // View store accessor — set lazily to avoid circular imports
 let _viewStoreRegister: ((view: Record<string, unknown>) => void) | null = null
 let _viewStoreGet: ((id: string) => Record<string, unknown> | undefined) | null = null
+let _openTab: ((viewId: string, title: string, icon: string) => void) | null = null
 
 export function setViewStoreAccessors(
   register: (view: Record<string, unknown>) => void,
-  getView: (id: string) => Record<string, unknown> | undefined
+  getView: (id: string) => Record<string, unknown> | undefined,
+  openTab?: (viewId: string, title: string, icon: string) => void
 ) {
   _viewStoreRegister = register
   _viewStoreGet = getView
+  if (openTab) _openTab = openTab
 }
 
 /**
  * Execute a tool call locally and return the result.
  */
 async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+  // Handle view.list — list all views from the client-side view store
+  if (tool === "view.list") {
+    if (!_viewStoreGet) return { error: "View store not available" }
+    // List views by scanning known IDs from localStorage
+    try {
+      const raw = localStorage.getItem("openclaw-views")
+      if (raw) {
+        const views = JSON.parse(raw)
+        const list = Object.values(views).map((v: unknown) => {
+          const view = v as Record<string, unknown>
+          return { id: view.id, title: view.title, type: view.type, icon: view.icon }
+        })
+        return { views: list }
+      }
+    } catch {
+      // ignore
+    }
+    return { views: [] }
+  }
+
   // Handle view.update — update code in view store (localStorage)
   if (tool === "view.update") {
     const viewId = params.viewId as string
@@ -156,19 +187,26 @@ async function executeMediaTool(tool: string, params: Record<string, unknown>): 
     if (existing?.type === "built-in") return { error: "Cannot edit built-in views. Clone it first." }
 
     // Update in store — Sandpack views render from code in store, no file writes needed
+    const title = (params.title as string) ?? existing?.title ?? viewId
     if (existing) {
-      _viewStoreRegister({ ...existing, code } as Record<string, unknown>)
+      _viewStoreRegister({ ...existing, code, title } as Record<string, unknown>)
     } else {
       _viewStoreRegister({
         id: viewId,
-        title: viewId,
+        title,
         icon: "sparkles",
         type: "ai-generated",
         code,
         createdAt: Date.now(),
       })
     }
-    return { ok: true, viewId, message: "View updated. Changes are live." }
+
+    // Auto-open the view as a tab so the user can see it immediately
+    if (_openTab) {
+      _openTab(viewId, title as string, "sparkles")
+    }
+
+    return { ok: true, viewId, message: "View updated and opened as a tab. Changes are live." }
   }
 
   try {
@@ -181,6 +219,148 @@ async function executeMediaTool(tool: string, params: Record<string, unknown>): 
   } catch (err) {
     return { error: String(err) }
   }
+}
+
+// --- Streaming throttle ---
+// Buffer the latest cumulative text per runId, flush to store at ~50ms intervals.
+// Prevents React from re-rendering on every single token (which freezes the UI).
+const _streamBuffer = new Map<string, { agentId: string; messageId: string; rawText: string }>()
+let _streamFlushScheduled = false
+const STREAM_THROTTLE_MS = 150
+
+// Track executed tool calls to avoid duplicate execution
+const _executedToolCalls = new Set<string>()
+// Idle timer per message — if no new tokens for 3s, mark streaming as done
+const _streamIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const STREAM_IDLE_TIMEOUT_MS = 3000
+
+function scheduleStreamFlush(set: (fn: (s: GatewayState) => Partial<GatewayState>) => void) {
+  if (_streamFlushScheduled) return
+  _streamFlushScheduled = true
+
+  setTimeout(() => {
+    _streamFlushScheduled = false
+    if (_streamBuffer.size === 0) return
+
+    // Take a snapshot and clear
+    const entries = Array.from(_streamBuffer.values())
+    _streamBuffer.clear()
+
+    set((s) => {
+      let messages = s.messages
+      for (const { agentId, messageId, rawText } of entries) {
+        const { content, toolCalls, isToolStreaming, streamingToolName } = splitContentAndTools(rawText)
+        const agentMsgs = messages[agentId] ?? []
+        const existing = agentMsgs.find((m) => m.id === messageId)
+        const msgData = {
+          content,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          isToolStreaming,
+          streamingToolName,
+          isStreaming: true,
+        }
+
+        if (existing) {
+          messages = {
+            ...messages,
+            [agentId]: agentMsgs.map((m) =>
+              m.id === messageId ? { ...m, ...msgData } : m
+            ),
+          }
+        } else {
+          messages = {
+            ...messages,
+            [agentId]: [
+              ...agentMsgs,
+              {
+                id: messageId,
+                agentId,
+                role: "assistant" as const,
+                ...msgData,
+                timestamp: Date.now(),
+              },
+            ],
+          }
+        }
+
+        // Execute complete tool calls immediately (don't wait for chat final)
+        if (toolCalls.length > 0 && !isToolStreaming) {
+          executeToolCallsFromStream(agentId, messageId, rawText, set)
+        }
+      }
+      return { messages }
+    })
+  }, STREAM_THROTTLE_MS)
+}
+
+/**
+ * Execute tool calls found in streamed text. Deduplicates to avoid running same tool twice.
+ */
+function executeToolCallsFromStream(
+  agentId: string,
+  messageId: string,
+  rawText: string,
+  set: (fn: (s: GatewayState) => Partial<GatewayState>) => void
+) {
+  const toolCalls = parseToolCalls(rawText)
+  if (toolCalls.length === 0) return
+
+  for (let i = 0; i < toolCalls.length; i++) {
+    const dedupeKey = `${messageId}:${toolCalls[i].tool}:${i}`
+    if (_executedToolCalls.has(dedupeKey)) continue
+    _executedToolCalls.add(dedupeKey)
+
+    const tc = toolCalls[i]
+    ;(async () => {
+      const result = await executeMediaTool(tc.tool, tc.params)
+      const resultMessage = `Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [agentId]: [
+            ...(s.messages[agentId] ?? []),
+            {
+              id: uid(),
+              agentId,
+              role: "tool" as const,
+              content: resultMessage,
+              timestamp: Date.now(),
+            },
+          ],
+        },
+      }))
+    })()
+  }
+}
+
+/**
+ * Reset idle timer for a streaming message. If no new tokens arrive for 3s,
+ * mark the message as done (handles cases where chat final event never arrives).
+ */
+function resetStreamIdleTimer(
+  messageId: string,
+  agentId: string,
+  set: (fn: (s: GatewayState) => Partial<GatewayState>) => void
+) {
+  const existing = _streamIdleTimers.get(messageId)
+  if (existing) clearTimeout(existing)
+
+  _streamIdleTimers.set(messageId, setTimeout(() => {
+    _streamIdleTimers.delete(messageId)
+    // Mark message as no longer streaming
+    set((s) => {
+      const agentMsgs = s.messages[agentId] ?? []
+      return {
+        messages: {
+          ...s.messages,
+          [agentId]: agentMsgs.map((m) =>
+            m.id === messageId ? { ...m, isStreaming: false, isToolStreaming: false } : m
+          ),
+        },
+      }
+    })
+  }, STREAM_IDLE_TIMEOUT_MS))
 }
 
 const MAX_EVENTS = 1000
@@ -427,7 +607,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
                 ...s.messages,
                 [event.agentId]: agentMsgs.map((m) =>
                   m.id === event.messageId
-                    ? { ...m, content: m.content + event.delta }
+                    ? { ...m, content: m.content + event.delta, isStreaming: true }
                     : m
                 ),
               },
@@ -438,6 +618,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             agentId: event.agentId,
             role: "assistant",
             content: event.delta,
+            isStreaming: true,
             timestamp: Date.now(),
           }
           return {
@@ -473,8 +654,27 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         break
 
       case "pong":
-      case "message.stream.end":
         break
+
+      case "message.stream.end": {
+        // Mark the streamed message as complete
+        const endAgentId = event.agentId
+        const endMsgId = (event as { messageId?: string }).messageId
+        if (endAgentId && endMsgId) {
+          set((s) => {
+            const agentMsgs = s.messages[endAgentId] ?? []
+            return {
+              messages: {
+                ...s.messages,
+                [endAgentId]: agentMsgs.map((m) =>
+                  m.id === endMsgId ? { ...m, isStreaming: false } : m
+                ),
+              },
+            }
+          })
+        }
+        break
+      }
 
       case "error":
         console.error(`[Gateway Error] ${event.code}: ${event.message}`)
@@ -592,12 +792,21 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           const toolCalls = parseToolCalls(finalText)
           if (toolCalls.length > 0 && agentId) {
             // Execute tool calls locally and send results back
+            // Skip already-executed ones (may have been run from agent events)
             ;(async () => {
               const results: string[] = []
-              for (const tc of toolCalls) {
+              for (let i = 0; i < toolCalls.length; i++) {
+                const tc = toolCalls[i]
+                const dedupeKey = `${messageId}:${tc.tool}:${i}`
+                if (_executedToolCalls.has(dedupeKey)) continue
+                _executedToolCalls.add(dedupeKey)
+
                 const result = await executeMediaTool(tc.tool, tc.params)
                 results.push(`Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``)
               }
+
+              if (results.length === 0) return // All already executed
+
               const resultMessage = `[Tool Results]\n\n${results.join("\n\n")}`
 
               // Add tool result as a system message in UI
@@ -627,6 +836,13 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
               }
             })()
           }
+
+          // Clear idle timer — chat final is the authoritative end signal
+          const idleTimer = _streamIdleTimers.get(messageId)
+          if (idleTimer) {
+            clearTimeout(idleTimer)
+            _streamIdleTimers.delete(messageId)
+          }
         }
 
         if (state === "delta" || state === "final") {
@@ -649,7 +865,13 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
           if (agentId && text) {
             // Split into clean content + tool calls at store level
-            const { content, toolCalls: parsedTools, isToolStreaming } = splitContentAndTools(text)
+            const { content, toolCalls: parsedTools, isToolStreaming, streamingToolName } = splitContentAndTools(text)
+            const isFinal = state === "final"
+
+            // Flush any pending stream buffer for this message on final
+            if (isFinal) {
+              _streamBuffer.delete(messageId)
+            }
 
             set((s) => {
               const agentMsgs = s.messages[agentId] ?? []
@@ -658,6 +880,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
                 content,
                 toolCalls: parsedTools.length > 0 ? parsedTools : undefined,
                 isToolStreaming,
+                streamingToolName,
+                isStreaming: !isFinal,
               }
 
               if (existing) {
@@ -828,6 +1052,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
       // Agent streaming events — real-time token-by-token updates
       // Format: { runId, stream: "assistant", data: { text, delta }, sessionKey, seq }
+      // Throttled: buffer latest text per runId, flush to store every ~50ms
       case "agent": {
         if (!payload?.data?.text || payload.stream !== "assistant") break
         const agentId = extractAgentId(payload.sessionKey)
@@ -835,44 +1060,10 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         const rawText = payload.data.text as string
 
         if (agentId && messageId && rawText) {
-          // Split text into clean content + structured tool calls at store level
-          const { content, toolCalls, isToolStreaming } = splitContentAndTools(rawText)
-
-          set((s) => {
-            const agentMsgs = s.messages[agentId] ?? []
-            const existing = agentMsgs.find((m) => m.id === messageId)
-            const msgData = {
-              content,
-              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-              isToolStreaming,
-            }
-
-            if (existing) {
-              return {
-                messages: {
-                  ...s.messages,
-                  [agentId]: agentMsgs.map((m) =>
-                    m.id === messageId ? { ...m, ...msgData } : m
-                  ),
-                },
-              }
-            }
-            return {
-              messages: {
-                ...s.messages,
-                [agentId]: [
-                  ...agentMsgs,
-                  {
-                    id: messageId,
-                    agentId,
-                    role: "assistant" as const,
-                    ...msgData,
-                    timestamp: Date.now(),
-                  },
-                ],
-              },
-            }
-          })
+          _streamBuffer.set(messageId, { agentId, messageId, rawText })
+          scheduleStreamFlush(set)
+          // Reset idle timer — if no new tokens for 3s, auto-finalize
+          resetStreamIdleTimer(messageId, agentId, set)
         }
         break
       }

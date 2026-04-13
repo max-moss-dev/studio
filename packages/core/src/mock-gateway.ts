@@ -118,17 +118,41 @@ export class MockGateway {
       }
 
       case "agent.message": {
-        // Simulate agent response
-        const responseMsg = {
-          id: uid(),
-          agentId: msg.agentId,
-          role: "assistant" as const,
-          content: `I received your message. Processing: "${msg.content.slice(0, 50)}..."`,
-          timestamp: Date.now(),
+        // Simulate streaming agent response (token-by-token like real gateway)
+        const fullText = `I received your message. Processing: "${msg.content.slice(0, 50)}..."\n\nHere's what I can help you with:\n- **Task coordination** across agents\n- **Code review** and implementation guidance\n- **Research** and analysis of technical topics\n- **Workflow orchestration** for complex multi-step tasks\n\nLet me know how I can assist you.`
+        const messageId = uid()
+        const agentId = msg.agentId
+        const words = fullText.split(/(\s+)/)
+        let accumulated = ""
+        let wordIdx = 0
+
+        const streamNext = () => {
+          if (wordIdx >= words.length) {
+            // Final: send complete message and end stream
+            this.emit({
+              type: "message.stream.end",
+              agentId,
+              messageId,
+            } as GatewayEvent)
+            return
+          }
+          // Stream 1-3 words at a time
+          const chunkSize = 1 + Math.floor(Math.random() * 2)
+          let delta = ""
+          for (let i = 0; i < chunkSize && wordIdx < words.length; i++) {
+            delta += words[wordIdx++]
+          }
+          accumulated += delta
+          this.emit({
+            type: "message.stream",
+            agentId,
+            messageId,
+            delta,
+          } as GatewayEvent)
+          setTimeout(streamNext, 20 + Math.random() * 40)
         }
-        setTimeout(() => {
-          this.emit({ type: "message", message: responseMsg })
-        }, 500 + Math.random() * 1500)
+
+        setTimeout(streamNext, 300)
         break
       }
 

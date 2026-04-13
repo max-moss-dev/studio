@@ -4,19 +4,32 @@ Track ongoing and planned work across the Studio project.
 
 ## In Progress
 
-- [ ] Verify streaming works end-to-end (need browser test with real gateway)
 - [ ] Build View Builder — code editor + embedded chat + live Sandpack preview
 
 ## Backlog
 
-- Коли багато вкладок зявляється горизонтальний скролл
 - Помилка канбан view при створенні таску (tasks.create — INVALID_REQUEST unknown method)
 - При перезавантаженні сторінки, потрібен час на завантадження всіх вкладок
-- Коли відкриваю вю чати то відкривається перший чат а не останній що був активний
-- Коли відкриваю чат то скролиться до кінця після відображення — дуже погано
 
 ## Completed (this session)
 
+- [x] Chrome-style tabs — shrink instead of scroll, no horizontal scrollbar
+- [x] Chat scroll — instant jump to bottom on open, smooth scroll on new messages only
+- [x] Styled scrollbar — thin 6px, theme-colored, across entire app
+- [x] User messages right-aligned with background bubble to differentiate from assistant
+- [x] Chat remembers last active agent (persisted to localStorage)
+- [x] Fix scroll-to-bottom on chat open — only scrolls on NEW messages, not initial load
+- [x] Hide tab bar horizontal scrollbar (scrollbar-none CSS utility)
+- [x] Create `/api/media/mcp` route for media/todo tool calls (was missing, all tool calls failed)
+- [x] Add `view.list` client-side handler and `streamingToolName` for tool call visibility
+- [x] Show "Calling media.list..." / "Thinking..." instead of generic "Generating..."
+- [x] Fix streaming — MarkdownRenderer `localContent` state never synced with `content` prop
+- [x] Throttle `agent` streaming events (50ms buffer) to prevent React re-render storms
+- [x] Use plain text during streaming, full markdown on completion
+- [x] Memoize MarkdownRenderer and MessageRow components
+- [x] Add `isStreaming` flag to Message type for streaming cursor indicator
+- [x] Add streaming simulation to mock gateway (was instant before)
+- [x] Mark streaming complete on `message.stream.end` and `chat` final events
 - [x] Fix hooks crash in ActiveView (useRef/useCallback after early returns)
 - [x] Handle `event: "agent"` streaming events (was only handling `event: "chat"`)
 - [x] Move tool call parsing from render to store level (`splitContentAndTools`)

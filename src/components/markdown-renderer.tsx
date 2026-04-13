@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo, memo, useRef, useEffect } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
@@ -9,6 +9,8 @@ interface MarkdownRendererProps {
   content: string
   onContentChange?: (newContent: string) => void
   className?: string
+  /** When true, renders plain text instead of parsing markdown (for streaming) */
+  streaming?: boolean
 }
 
 /**
@@ -16,22 +18,31 @@ interface MarkdownRendererProps {
  * - GFM (GitHub Flavored Markdown) support
  * - Interactive checkboxes that toggle in source
  * - Styled tables, code blocks, links
+ * - Streaming mode: renders plain text to avoid expensive re-parses
  */
-export function MarkdownRenderer({
+export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   onContentChange,
   className,
+  streaming,
 }: MarkdownRendererProps) {
-  const [localContent, setLocalContent] = useState(content)
+  // Local state only used for standalone checkbox toggling (no onContentChange)
+  const [localEdits, setLocalEdits] = useState<string | null>(null)
+  const prevContentRef = useRef(content)
 
-  // Keep in sync with prop
-  if (content !== localContent && !onContentChange) {
-    // Read-only mode — just track prop
-  }
+  // Reset local edits when content prop changes (e.g. during streaming)
+  useEffect(() => {
+    if (content !== prevContentRef.current) {
+      prevContentRef.current = content
+      setLocalEdits(null)
+    }
+  }, [content])
+
+  const displayContent = onContentChange ? content : (localEdits ?? content)
 
   const handleCheckboxToggle = useCallback(
     (lineIndex: number) => {
-      const lines = (onContentChange ? content : localContent).split("\n")
+      const lines = displayContent.split("\n")
       const line = lines[lineIndex]
       if (!line) return
 
@@ -45,149 +56,150 @@ export function MarkdownRenderer({
       if (onContentChange) {
         onContentChange(newContent)
       } else {
-        setLocalContent(newContent)
+        setLocalEdits(newContent)
       }
     },
-    [content, localContent, onContentChange]
+    [displayContent, onContentChange]
   )
 
-  // Track which checkbox we're on to map to source lines
-  let checkboxIndex = -1
-  const checkboxLineMap: number[] = []
-  const lines = (onContentChange ? content : localContent).split("\n")
-  lines.forEach((line, i) => {
-    if (line.match(/- \[[ x]\]/i)) {
-      checkboxLineMap.push(i)
-    }
-  })
-
-  const components: Components = {
-    // Interactive checkboxes
-    input: (props) => {
-      if (props.type === "checkbox") {
-        checkboxIndex++
-        const idx = checkboxIndex
-        const lineIdx = checkboxLineMap[idx]
-        return (
-          <input
-            type="checkbox"
-            checked={props.checked}
-            onChange={() => {
-              if (lineIdx !== undefined) handleCheckboxToggle(lineIdx)
-            }}
-            className="mr-2 cursor-pointer accent-[#98c379] h-4 w-4 align-middle"
-          />
-        )
+  // Memoize components to avoid ReactMarkdown full re-renders
+  const components: Components = useMemo(() => {
+    // Track which checkbox we're on to map to source lines
+    let checkboxIndex = -1
+    const checkboxLineMap: number[] = []
+    const lines = displayContent.split("\n")
+    lines.forEach((line, i) => {
+      if (line.match(/- \[[ x]\]/i)) {
+        checkboxLineMap.push(i)
       }
-      return <input {...props} />
-    },
+    })
 
-    // Styled code blocks
-    code: ({ className: codeClass, children, ...rest }) => {
-      const isInline = !codeClass
-      if (isInline) {
+    return {
+      input: (props) => {
+        if (props.type === "checkbox") {
+          checkboxIndex++
+          const idx = checkboxIndex
+          const lineIdx = checkboxLineMap[idx]
+          return (
+            <input
+              type="checkbox"
+              checked={props.checked}
+              onChange={() => {
+                if (lineIdx !== undefined) handleCheckboxToggle(lineIdx)
+              }}
+              className="mr-2 cursor-pointer accent-[#98c379] h-4 w-4 align-middle"
+            />
+          )
+        }
+        return <input {...props} />
+      },
+
+      code: ({ className: codeClass, children, ...rest }) => {
+        const isInline = !codeClass
+        if (isInline) {
+          return (
+            <code
+              className="rounded bg-[#2c313a] px-1.5 py-0.5 text-[13px] font-mono text-[#e5c07b]"
+              {...rest}
+            >
+              {children}
+            </code>
+          )
+        }
         return (
           <code
-            className="rounded bg-[#2c313a] px-1.5 py-0.5 text-[13px] font-mono text-[#e5c07b]"
+            className={`block rounded-md bg-[#2c313a] p-3 text-[13px] font-mono overflow-x-auto ${codeClass ?? ""}`}
             {...rest}
           >
             {children}
           </code>
         )
-      }
-      return (
-        <code
-          className={`block rounded-md bg-[#2c313a] p-3 text-[13px] font-mono overflow-x-auto ${codeClass ?? ""}`}
-          {...rest}
+      },
+
+      pre: ({ children }) => (
+        <pre className="rounded-md bg-[#2c313a] border border-[#3e4451] overflow-x-auto my-2">
+          {children}
+        </pre>
+      ),
+
+      a: ({ href, children }) => (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#61afef] underline hover:text-[#61afef]/80"
         >
           {children}
-        </code>
-      )
-    },
+        </a>
+      ),
 
-    pre: ({ children }) => (
-      <pre className="rounded-md bg-[#2c313a] border border-[#3e4451] overflow-x-auto my-2">
-        {children}
-      </pre>
-    ),
-
-    // Links
-    a: ({ href, children }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[#61afef] underline hover:text-[#61afef]/80"
-      >
-        {children}
-      </a>
-    ),
-
-    // Tables
-    table: ({ children }) => (
-      <div className="overflow-x-auto my-2">
-        <table className="w-full text-sm border-collapse">{children}</table>
-      </div>
-    ),
-    th: ({ children }) => (
-      <th className="border border-[#3e4451] bg-[#2c313a] px-3 py-1.5 text-left font-medium">
-        {children}
-      </th>
-    ),
-    td: ({ children }) => (
-      <td className="border border-[#3e4451] px-3 py-1.5">{children}</td>
-    ),
-
-    // Headings
-    h1: ({ children }) => (
-      <h1 className="text-xl font-bold mt-4 mb-2 text-[#d7dae0]">{children}</h1>
-    ),
-    h2: ({ children }) => (
-      <h2 className="text-lg font-semibold mt-3 mb-1.5 text-[#d7dae0]">{children}</h2>
-    ),
-    h3: ({ children }) => (
-      <h3 className="text-base font-semibold mt-2 mb-1 text-[#d7dae0]">{children}</h3>
-    ),
-
-    // Lists
-    ul: ({ children }) => (
-      <ul className="list-disc pl-5 my-1 space-y-0.5">{children}</ul>
-    ),
-    ol: ({ children }) => (
-      <ol className="list-decimal pl-5 my-1 space-y-0.5">{children}</ol>
-    ),
-    li: ({ children, className: liClass }) => {
-      // Task list items have class "task-list-item"
-      const isTask = liClass?.includes("task-list-item")
-      return (
-        <li className={isTask ? "list-none -ml-5 flex items-start gap-0" : ""}>
+      table: ({ children }) => (
+        <div className="overflow-x-auto my-2">
+          <table className="w-full text-sm border-collapse">{children}</table>
+        </div>
+      ),
+      th: ({ children }) => (
+        <th className="border border-[#3e4451] bg-[#2c313a] px-3 py-1.5 text-left font-medium">
           {children}
-        </li>
-      )
-    },
+        </th>
+      ),
+      td: ({ children }) => (
+        <td className="border border-[#3e4451] px-3 py-1.5">{children}</td>
+      ),
 
-    // Blockquotes
-    blockquote: ({ children }) => (
-      <blockquote className="border-l-2 border-[#61afef] pl-3 my-2 text-[#abb2bf] italic">
-        {children}
-      </blockquote>
-    ),
+      h1: ({ children }) => (
+        <h1 className="text-xl font-bold mt-4 mb-2 text-[#d7dae0]">{children}</h1>
+      ),
+      h2: ({ children }) => (
+        <h2 className="text-lg font-semibold mt-3 mb-1.5 text-[#d7dae0]">{children}</h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="text-base font-semibold mt-2 mb-1 text-[#d7dae0]">{children}</h3>
+      ),
 
-    // Paragraphs
-    p: ({ children }) => <p className="my-1">{children}</p>,
+      ul: ({ children }) => (
+        <ul className="list-disc pl-5 my-1 space-y-0.5">{children}</ul>
+      ),
+      ol: ({ children }) => (
+        <ol className="list-decimal pl-5 my-1 space-y-0.5">{children}</ol>
+      ),
+      li: ({ children, className: liClass }) => {
+        const isTask = liClass?.includes("task-list-item")
+        return (
+          <li className={isTask ? "list-none -ml-5 flex items-start gap-0" : ""}>
+            {children}
+          </li>
+        )
+      },
 
-    // Horizontal rules
-    hr: () => <hr className="border-[#3e4451] my-3" />,
+      blockquote: ({ children }) => (
+        <blockquote className="border-l-2 border-[#61afef] pl-3 my-2 text-[#abb2bf] italic">
+          {children}
+        </blockquote>
+      ),
 
-    // Images
-    img: ({ src, alt }) => (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt={alt ?? ""}
-        className="max-w-full rounded-md my-2"
-      />
-    ),
+      p: ({ children }) => <p className="my-1">{children}</p>,
+
+      hr: () => <hr className="border-[#3e4451] my-3" />,
+
+      img: ({ src, alt }) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={alt ?? ""}
+          className="max-w-full rounded-md my-2"
+        />
+      ),
+    }
+  }, [displayContent, handleCheckboxToggle])
+
+  // During streaming, render plain text to avoid expensive markdown re-parses
+  if (streaming) {
+    return (
+      <div className={`prose prose-invert max-w-none text-sm text-[#abb2bf] ${className ?? ""}`}>
+        <p className="my-1 whitespace-pre-wrap">{displayContent}</p>
+      </div>
+    )
   }
 
   return (
@@ -196,8 +208,8 @@ export function MarkdownRenderer({
         remarkPlugins={[remarkGfm]}
         components={components}
       >
-        {onContentChange ? content : localContent}
+        {displayContent}
       </ReactMarkdown>
     </div>
   )
-}
+})
