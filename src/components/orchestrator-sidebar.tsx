@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Bot, Send, Loader2, GripVertical, Zap, Terminal, MessageSquare, Users, ChevronLeft, Layers } from "lucide-react"
+import { Bot, Send, Loader2, GripVertical, Zap, Terminal, MessageSquare, Users, ChevronLeft, Layers, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useGatewayStore } from "@/stores/gateway-store"
@@ -237,6 +237,29 @@ export function OrchestratorSidebar() {
             </button>
             
             <div className="flex-1" />
+            
+            {messages.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm("Clear all messages?")) {
+                    const state = useGatewayStore.getState()
+                    state.messages[ORCHESTRATOR_AGENT_ID] = []
+                    state.addMessage(ORCHESTRATOR_AGENT_ID, {
+                      id: uid(),
+                      agentId: ORCHESTRATOR_AGENT_ID,
+                      sessionId: sessionId ?? undefined,
+                      role: "assistant",
+                      content: "Chat cleared. How can I help you?",
+                      timestamp: Date.now(),
+                    })
+                  }
+                }}
+                className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="Clear chat"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
             
             {isStreaming && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
