@@ -207,8 +207,10 @@ export function setViewStoreAccessors(
  * Execute a tool call locally and return the result.
  */
 export async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
-  // Handle create_task — add a task to the Kanban board
-  if (tool === "create_task") {
+  // ── Task Management Tools ───────────────────────────────────────────────────
+
+  // task.create — Create a new task on the Kanban board
+  if (tool === "task.create" || tool === "create_task") {
     const title = (params.title as string) || "New Task"
     const rawStatus = params.status as string
     const validStatuses = ["queue", "in_progress", "review", "done"]
@@ -231,13 +233,79 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
     return { ok: true, taskId: task.id, message: `Task "${title}" created on Kanban board` }
   }
 
-  // Handle open_view — open a tab in the Studio UI
-  if (tool === "open_view") {
+  // task.list — Get all tasks and their status
+  if (tool === "task.list") {
+    const state = useGatewayStore.getState()
+    return {
+      tasks: state.tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        assigneeId: t.assigneeId,
+        tokens: t.tokens,
+        duration: t.duration,
+        createdAt: t.createdAt,
+      })),
+    }
+  }
+
+  // task.update — Update task status
+  if (tool === "task.update") {
+    const taskId = params.taskId as string
+    const updates = params.updates as Record<string, unknown> | undefined
+
+    if (!taskId) {
+      return { error: "taskId is required" }
+    }
+
+    const state = useGatewayStore.getState()
+    const existing = state.tasks.find((t) => t.id === taskId)
+    if (!existing) {
+      return { error: `Task not found: ${taskId}` }
+    }
+
+    const updatedTask: Task = {
+      ...existing,
+      updatedAt: Date.now(),
+    }
+
+    if (updates?.status) {
+      const validStatuses = ["queue", "in_progress", "review", "done"]
+      const status = updates.status as string
+      if (validStatuses.includes(status)) {
+        updatedTask.status = status as Task["status"]
+      }
+    }
+    if (updates?.title) {
+      updatedTask.title = updates.title as string
+    }
+    if (updates?.assigneeId !== undefined) {
+      updatedTask.assigneeId = updates.assigneeId as string | null
+    }
+    if (updates?.tokens) {
+      updatedTask.tokens = updates.tokens as number
+    }
+    if (updates?.duration) {
+      updatedTask.duration = updates.duration as number
+    }
+
+    if (_storeSet) {
+      _storeSet((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? updatedTask : t)),
+      }))
+    }
+
+    return { ok: true, task: updatedTask, message: `Task "${updatedTask.title}" updated` }
+  }
+
+  // Handle open_view / view.open — open a tab in the Studio UI
+  if (tool === "open_view" || tool === "view.open") {
     const view = (params.view as string) || (params.viewId as string) || "kanban"
     const title = (params.title as string) || view
     const icon = (params.icon as string) || "layout"
+    const state = (params.state as Record<string, unknown>) || {}
     if (_openTab) {
-      _openTab(view, title, icon)
+      _openTab(view, title, icon, state)
       return { ok: true, message: `Opened "${title}" view` }
     }
     return { error: "Tab opener not available" }
@@ -468,15 +536,26 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
       }
     }
 
+    // Get taskId if provided (for task-agent linking)
+    const taskId = params.taskId as string | undefined
+
     // Get or create a session for the target agent
     let sessionId: string
     if (createNewSession) {
-      sessionId = state.createSession(targetAgent.id, `Delegated: ${message.slice(0, 40)}`)
+      const title = taskId ? `Task: ${taskId.slice(0, 20)}` : `Delegated: ${message.slice(0, 40)}`
+      sessionId = state.createSession(targetAgent.id, title)
     } else {
       const existing = state.sessions
         .filter((s) => s.agentId === targetAgent.id)
         .sort((a, b) => b.updatedAt - a.updatedAt)[0]
       sessionId = existing?.id ?? state.createSession(targetAgent.id)
+    }
+
+    // Update task assignee if taskId provided
+    if (taskId && _storeSet) {
+      _storeSet((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, assigneeId: targetAgent.id, status: "in_progress" } : t)),
+      }))
     }
 
     // Add a visible user message to the store so it shows up in ChatsView
@@ -485,7 +564,9 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
       agentId: targetAgent.id,
       sessionId,
       role: "user",
-      content: `[Delegated by Orchestrator]\n\n${message}`,
+      content: taskId
+        ? `[Delegated by Orchestrator]\nTask: ${taskId}\n\n${message}`
+        : `[Delegated by Orchestrator]\n\n${message}`,
       timestamp: Date.now(),
     })
 
@@ -497,12 +578,21 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
       content: message,
     })
 
+    // Auto-open Chats view with this agent
+    if (_openTab) {
+      _openTab("chats", `Chat: ${targetAgent.name}`, "message-square", {
+        agentId: targetAgent.id,
+        sessionId,
+      })
+    }
+
     return {
       ok: true,
       agentId: targetAgent.id,
       agentName: targetAgent.name,
       sessionId,
-      message: `Delegated to ${targetAgent.name} (${targetAgent.role})`,
+      taskId: taskId ?? null,
+      message: `Delegated to ${targetAgent.name} (${targetAgent.role})` + (taskId ? ` for task ${taskId}` : ""),
     }
   }
 

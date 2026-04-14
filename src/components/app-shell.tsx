@@ -18,7 +18,6 @@ import { BundledView } from "@/components/bundled-view"
 import { ViewErrorBoundary } from "@/components/error-boundary"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { OrchestratorSidebar } from "@/components/orchestrator-sidebar"
-import { OrchestratorToggleButton } from "@/components/orchestrator-sidebar"
 
 // Lazy load built-in views
 const AgentManagerView = lazy(() => import("@/views/agent-manager"))

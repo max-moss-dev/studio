@@ -13,6 +13,8 @@ import {
   FileText,
   CheckCircle,
   Code,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useGatewayStore } from "@/stores/gateway-store"

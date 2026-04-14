@@ -4,11 +4,14 @@ Track ongoing and planned work across the Studio project.
 
 ## In Progress
 
+- [ ] Kanban Board Enhancement — display task-agent associations and auto-updates
+  - [ ] Show agent name/icon on task cards (already partially working via `getAgentName`)
+  - [ ] Color-code tasks by assigned agent role
+  - [ ] Auto-update task status when agent reports completion (via events)
 - [ ] Global Orchestrator Sidebar — test full flow end-to-end
-  - agent.status, agent.delegate, chat.open tool calls
-  - Mock streaming responses
+  - Mock streaming responses with tool calls
   - Sidebar persistence across view switches
-- Build logs view etc, so orckestator has instant access to the error logs happening in the app, can we put browser console logs there?
+- Build logs view etc, so orchestrator has instant access to the error logs happening in the app, can we put browser console logs there?
 
 ## Backlog — Plugin System
 - [ ] Test full plugin flow: agent writes plugin → plugin.build → renders natively with store access

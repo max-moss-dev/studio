@@ -20,7 +20,7 @@ import type { Message } from "@/lib/types"
 import { loadProviders, type ProviderId } from "@/lib/providers"
 import { useTabStore } from "@/stores/tab-store"
 
-const PROVIDER_META: Record<ProviderId, { icon: React.ComponentType<{ className?: string }>; color: string; label: string }> = {
+const PROVIDER_META: Record<ProviderId, { icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = {
   openclaw: { icon: Zap, color: "#61afef", label: "OpenClaw" },
   opencode: { icon: Terminal, color: "#e5c07b", label: "OpenCode" },
 }
@@ -150,6 +150,36 @@ export function OrchestratorSidebar() {
   }
 
   const currentWidth = isOpen ? width : COLLAPSED_WIDTH
+
+  // Prevent hydration mismatch by not rendering content that depends on client-side data until mounted
+  if (!mounted) {
+    return (
+      <aside
+        ref={sidebarRef}
+        className="flex flex-col border-r bg-background shrink-0 overflow-hidden relative h-full"
+        style={{ width: currentWidth, transition: "width 200ms ease" }}
+      >
+        {/* Skeleton for collapsed state */}
+        {!isOpen && (
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-center h-11 border-b">
+              <div className="h-5 w-5 bg-muted rounded" />
+            </div>
+          </div>
+        )}
+        {/* Skeleton for open state */}
+        {isOpen && (
+          <>
+            <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0 bg-header-bg h-11">
+              <div className="h-5 w-5 bg-muted rounded" />
+              <div className="h-4 w-16 bg-muted rounded" />
+            </div>
+            <div className="flex-1" />
+          </>
+        )}
+      </aside>
+    )
+  }
 
   return (
     <aside
