@@ -1,17 +1,24 @@
 "use client"
 
 import { useEffect, lazy, Suspense } from "react"
+import * as React from "react"
+import * as LucideIcons from "lucide-react"
 import { Header } from "./header"
 import { Button } from "@/components/ui/button"
 import { useTabStore } from "@/stores/tab-store"
 import { useViewStore } from "@/stores/view-store"
+import { usePluginStore } from "@/stores/plugin-store"
+import type { PluginManifest } from "@/stores/plugin-store"
 import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/stores/gateway-store"
 import { loadProviders } from "@/lib/providers"
 import { useGateway } from "@/hooks/use-gateway"
 import { Loader2, AlertTriangle, Radio, Code } from "lucide-react"
 import { RuntimeView } from "@/components/runtime-view"
+import { BundledView } from "@/components/bundled-view"
 import { ViewErrorBoundary } from "@/components/error-boundary"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { OrchestratorSidebar } from "@/components/orchestrator-sidebar"
+import { OrchestratorToggleButton } from "@/components/orchestrator-sidebar"
 
 // Lazy load built-in views
 const AgentManagerView = lazy(() => import("@/views/agent-manager"))
@@ -78,6 +85,7 @@ function ActiveView() {
   const tabs = useTabStore((s) => s.tabs)
   const openTab = useTabStore((s) => s.openTab)
   const views = useViewStore((s) => s.views)
+  const pluginOverride = usePluginStore((s) => s.getOverride)
   const { agents, events, tasks, messages, send, models, opencodeModels } = useGateway()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
@@ -85,6 +93,19 @@ function ActiveView() {
 
   const tabState = activeTab.state ?? {}
   const viewProps = { agents, events, tasks, messages, send, models, opencodeModels }
+
+  // Check for plugin override of built-in view
+  const override = pluginOverride(activeTab.viewId)
+  if (override) {
+    return (
+      <BundledView
+        pluginId={override.manifest.id}
+        viewProps={viewProps}
+        onSend={send}
+        onError={(err) => sendViewErrorToAgent(activeTab.viewId, err, send)}
+      />
+    )
+  }
 
   // Built-in views
   switch (activeTab.viewId) {
@@ -108,14 +129,27 @@ function ActiveView() {
       return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
   }
 
-  // Custom/AI-generated views — render in Sandpack iframe
+  // Compiled plugin (esbuild bundle) — BundledView loads via fetch + dynamic import
+  const installedPlugin = usePluginStore.getState().plugins[activeTab.viewId]
+  if (installedPlugin) {
+    return (
+      <BundledView
+        pluginId={activeTab.viewId}
+        viewProps={viewProps}
+        onSend={send}
+        onError={(err) => sendViewErrorToAgent(activeTab.viewId, err, send)}
+      />
+    )
+  }
+
+  // AI-generated single-file view — RuntimeView (sucrase, no build step)
   const viewDef = views.find((v: { id: string }) => v.id === activeTab.viewId)
   if (viewDef?.code) {
     return (
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-2 border-b px-3 py-1.5 bg-muted/30 shrink-0">
           <span className="text-xs text-muted-foreground flex-1">
-            {viewDef.type === "plugin" ? "Plugin" : "AI View"}: {activeTab.title}
+            AI View: {activeTab.title}
           </span>
           <Button
             variant="ghost"
@@ -275,12 +309,35 @@ export function AppShell() {
   const setActiveTab = useTabStore((s) => s.setActiveTab)
   const registerView = useViewStore((s) => s.registerView)
   const getView = useViewStore((s) => s.getView)
+
+  // Inject Studio globals for plugin runtime shims — must run before any plugin loads
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = globalThis as any
+    g.__studio_react = React
+    g.__studio_store = {
+      useGatewayStore,
+      useTabStore: useTabStore,
+    }
+    // Plugin registration callback — called by plugin.build after successful compile
+    g.__studioPluginRegister = (id: string, manifest: PluginManifest) => {
+      const store = usePluginStore.getState()
+      store.registerPlugin({ ...manifest, id })
+      store.updatePlugin(id, { built: true })
+      store.clearComponentCache(id)
+    }
+    // Load lucide icons lazily (large module)
+    import("lucide-react").then((icons) => {
+      g.__studio_icons = icons
+    })
+  }, [])
+
   // Wire up view store accessors for the gateway tool proxy
   useEffect(() => {
     setViewStoreAccessors(
       (view) => registerView(view as unknown as import("@/lib/types").ViewDefinition),
       (id) => getView(id) as Record<string, unknown> | undefined,
-      (viewId, title, icon) => openTab(viewId, title, icon)
+      (viewId, title, icon, state) => openTab(viewId, title, icon, state)
     )
   }, [registerView, getView, openTab])
 
@@ -314,15 +371,18 @@ export function AppShell() {
   }, [])
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      <Header />
-      <ConnectionErrorBanner />
-      <main className="flex-1 overflow-hidden">
-        <ViewErrorBoundary>
-          <ActiveView />
-        </ViewErrorBoundary>
-      </main>
-      <Footer />
+    <div className="flex h-screen overflow-hidden">
+      <OrchestratorSidebar />
+      <div className="flex flex-col flex-1 min-w-0">
+        <Header />
+        <ConnectionErrorBanner />
+        <main className="flex-1 overflow-hidden min-w-0">
+          <ViewErrorBoundary>
+            <ActiveView />
+          </ViewErrorBoundary>
+        </main>
+        <Footer />
+      </div>
     </div>
   )
 }

@@ -123,4 +123,45 @@ send({ type: "task.create", title: "Fix bug", assigneeId: "coder-1" })
 3. **One view = one purpose** — keep it focused
 4. **Use real data** — never hardcode sample data, always use store
 5. **Height 100%** — views fill the tab; set \`height: "100%"\` on root element
+
+---
+
+## Full Plugin System (multi-file, npm deps)
+
+For complex views that need multiple files, npm packages, or built-in view overrides/extensions use the plugin tools instead of view.update.
+
+### Build a standalone plugin
+
+\`\`\`tool
+{"tool": "plugin.write", "params": {"pluginId": "projects", "filePath": "src/index.tsx", "content": "import React, { useState } from 'react'\\nimport { useGatewayStore } from '@studio/store'\\n\\nexport default function ProjectsView() {\\n  const agents = useGatewayStore(s => s.agents)\\n  return <div style={{padding:20,color:'#abb2bf'}}>{agents.length} agents</div>\\n}"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "plugin.build", "params": {"pluginId": "projects", "title": "Projects", "icon": "folder"}}
+\`\`\`
+
+### Override a built-in view (e.g. add Projects filter to Chats)
+
+1. Clone the built-in view source:
+\`\`\`tool
+{"tool": "view.clone", "params": {"viewId": "chats"}}
+\`\`\`
+2. Write the modified version and build with type="override":
+\`\`\`tool
+{"tool": "plugin.build", "params": {"pluginId": "chats-with-projects", "type": "override", "overrides": "chats"}}
+\`\`\`
+
+### Inject UI into a built-in view slot
+
+Available slots: \`chats.sidebar\`, \`chats.toolbar\`
+
+\`\`\`tool
+{"tool": "plugin.build", "params": {"pluginId": "projects-sidebar", "type": "extension", "slots": ["chats.sidebar"]}}
+\`\`\`
+
+### Install npm packages
+
+\`\`\`tool
+{"tool": "plugin.install-deps", "params": {"pluginId": "projects", "deps": ["date-fns", "recharts"]}}
+\`\`\`
 `.trim()

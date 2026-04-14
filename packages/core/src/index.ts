@@ -50,3 +50,6 @@ export {
 // Hooks
 export { useGateway } from "./hooks/use-gateway"
 export { useAgentData } from "./hooks/use-agent-data"
+
+// Orchestrator
+export { ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_PROMPT } from "./prompts/orchestrator"

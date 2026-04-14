@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { useTabStore } from "@/stores/tab-store"
+import { useOrchestratorStore } from "@/stores/orchestrator-store"
 
 /**
  * Global keyboard shortcuts for Studio.
@@ -18,11 +19,19 @@ export function useKeyboardShortcuts() {
   const setActiveTab = useTabStore((s) => s.setActiveTab)
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
+  const toggleOrchestrator = useOrchestratorStore((s) => s.toggle)
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
+
+      // Ctrl+Shift+O — toggle orchestrator sidebar
+      if (e.key === "o" && e.shiftKey) {
+        e.preventDefault()
+        toggleOrchestrator()
+        return
+      }
 
       // Ctrl+T — new tab
       if (e.key === "t") {
@@ -79,5 +88,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [openTab, closeTab, setActiveTab, tabs, activeTabId])
+  }, [openTab, closeTab, setActiveTab, tabs, activeTabId, toggleOrchestrator])
 }

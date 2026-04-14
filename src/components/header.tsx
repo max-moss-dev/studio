@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Layers, Wifi, WifiOff, X, Plus, LogOut, Users, Zap, Terminal } from "lucide-react"
+import { X, Plus, Zap, Terminal } from "lucide-react"
 import {
   Bot,
   Kanban,
@@ -19,6 +19,7 @@ import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
 import { cn } from "@/lib/utils"
 import { loadProviders, type ProviderId } from "@/lib/providers"
+
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   bot: Bot,
@@ -140,20 +141,7 @@ export function Header() {
 
   return (
     <header className="flex h-11 items-center bg-header-bg shrink-0">
-      {/* Logo — opens settings */}
-      <button
-        onClick={handleOpenSettings}
-        className="flex items-center gap-2.5 px-3 shrink-0 h-full cursor-pointer hover:bg-background/30 transition-colors"
-      >
-        <div className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#3e4451]">
-          <Layers className="h-4 w-4 text-[#abb2bf]" />
-        </div>
-        <span className="text-[15px] font-semibold tracking-tight text-secondary-foreground">
-          Studio
-        </span>
-      </button>
-
-      {/* Tabs — draggable for reorder */}
+      {/* Tabs — start immediately after sidebar, no logo here */}
       <div className="flex items-center flex-1 h-full overflow-hidden min-w-0">
         {tabs.map((tab, idx) => {
           const Icon = ICON_MAP[tab.icon ?? ""] ?? Sparkles
@@ -219,30 +207,15 @@ export function Header() {
         </button>
       </div>
 
-      {/* Right side — provider badges + agent count + logout */}
+      {/* Right side — Settings button */}
       <div className="flex items-center gap-2 px-3 shrink-0">
-        {connected && agents.length > 0 && (
-          <div className="flex items-center gap-1.5 rounded-xl bg-[#3e4451] px-2.5 py-0.5">
-            <Users className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">{agents.length} Agent{agents.length !== 1 ? "s" : ""}</span>
-          </div>
-        )}
-
-        <ProviderBadges onOpenSettings={handleOpenSettings} />
-
-        {connected && (
-          <button
-            onClick={() => {
-              disconnect()
-              try { localStorage.removeItem("openclaw-gateway-config") } catch {}
-              handleOpenSettings()
-            }}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1 rounded hover:bg-muted"
-            title="Disconnect"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          onClick={handleOpenSettings}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1.5 rounded hover:bg-muted"
+          title="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
       </div>
     </header>
   )

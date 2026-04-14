@@ -17,6 +17,7 @@ import { WsClient } from "./ws-client"
 import { MockGateway } from "./mock-gateway"
 import { uid } from "./mock-data"
 import { VIEW_BUILDER_PROMPT } from "./prompts/view-builder"
+import { ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_PROMPT } from "./prompts/orchestrator"
 
 // --- Media Tool Proxy ---
 
@@ -70,6 +71,35 @@ Studio (app integration):
 
 \`\`\`tool
 {"tool": "open_view", "params": {"view": "kanban", "title": "Task Board"}}
+\`\`\`
+
+Plugin system (build native UI views):
+- plugin.write: Write a source file into a plugin (params: pluginId, filePath, content)
+- plugin.build: Compile and install the plugin — opens it as a new tab (params: pluginId, title?, icon?, type?: "standalone"|"override"|"extension", overrides?: string, slots?: string[])
+- plugin.list: List all installed plugins (no params)
+- plugin.install-deps: Install npm packages for a plugin (params: pluginId, deps: string[])
+- view.clone: Read a built-in view's source code so you can fork/extend it (params: viewId: "chats"|"kanban"|"agent-manager"|"settings")
+
+Plugin authoring rules:
+- Import React from "react" — it resolves to the shared Studio React instance (no hooks breakage)
+- Import stores from "@studio/store": \`import { useGatewayStore, useTabStore } from "@studio/store"\`
+- Import icons from "lucide-react"
+- The plugin's default export must be a React component: \`export default function MyView(props) { ... }\`
+- Props passed to the component: agents, events, tasks, messages, send, models, opencodeModels
+- For "override" plugins set type="override" and overrides="chats" (or other built-in viewId)
+- For "extension" plugins set type="extension" and slots=["chats.sidebar"] (or other slot name)
+- Available slot names: chats.sidebar, chats.toolbar
+
+\`\`\`tool
+{"tool": "plugin.write", "params": {"pluginId": "projects", "filePath": "src/index.tsx", "content": "import React from 'react'\\nexport default function ProjectsView() { return <div>Projects</div> }"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "plugin.build", "params": {"pluginId": "projects", "title": "Projects", "icon": "folder"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "view.clone", "params": {"viewId": "chats"}}
 \`\`\`
 
 Tips:
@@ -161,12 +191,12 @@ export function splitContentAndTools(rawText: string): {
 // View store accessor — set lazily to avoid circular imports
 let _viewStoreRegister: ((view: Record<string, unknown>) => void) | null = null
 let _viewStoreGet: ((id: string) => Record<string, unknown> | undefined) | null = null
-let _openTab: ((viewId: string, title: string, icon: string) => void) | null = null
+let _openTab: ((viewId: string, title: string, icon: string, state?: Record<string, unknown>) => void) | null = null
 
 export function setViewStoreAccessors(
   register: (view: Record<string, unknown>) => void,
   getView: (id: string) => Record<string, unknown> | undefined,
-  openTab?: (viewId: string, title: string, icon: string) => void
+  openTab?: (viewId: string, title: string, icon: string, state?: Record<string, unknown>) => void
 ) {
   _viewStoreRegister = register
   _viewStoreGet = getView
@@ -264,6 +294,244 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
 
     return { ok: true, viewId, message: "View updated and opened as a tab. Changes are live." }
   }
+
+  // ── Plugin tools ─────────────────────────────────────────────────────────
+
+  // plugin.write — write a source file into a plugin directory
+  if (tool === "plugin.write") {
+    const pluginId = params.pluginId as string
+    const filePath = (params.filePath as string) || "src/index.tsx"
+    const content = params.content as string
+    if (!pluginId || !content) return { error: "pluginId and content are required" }
+
+    try {
+      const res = await fetch("/api/plugins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "write", pluginId, filePath, content }),
+      })
+      return await res.json()
+    } catch (err) {
+      return { error: String(err) }
+    }
+  }
+
+  // plugin.build — compile plugin via esbuild, then register + open it
+  if (tool === "plugin.build") {
+    const pluginId = params.pluginId as string
+    if (!pluginId) return { error: "pluginId is required" }
+
+    try {
+      const res = await fetch("/api/plugins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "build", pluginId }),
+      })
+      const result = await res.json()
+      if (result.error) return result
+
+      // Register plugin in the plugin store and open as a tab
+      // The client side handles this via the window.__studioPluginRegister hook
+      const manifest: Record<string, unknown> = {
+        id: pluginId,
+        title: (params.title as string) || pluginId,
+        icon: (params.icon as string) || "package",
+        type: (params.type as string) || "standalone",
+      }
+      if (params.overrides) manifest.overrides = params.overrides
+      if (params.slots) manifest.slots = params.slots
+      if (params.version) manifest.version = params.version
+      if (params.description) manifest.description = params.description
+
+      if (typeof window !== "undefined") {
+        const g = window as unknown as Record<string, unknown>
+        if (typeof g.__studioPluginRegister === "function") {
+          const fn = g.__studioPluginRegister as (id: string, manifest: Record<string, unknown>) => void
+          fn(pluginId, manifest)
+        }
+      }
+
+      // Open as a tab only for standalone plugins (not overrides/extensions)
+      const pluginType = (params.type as string) || "standalone"
+      if (_openTab && pluginType === "standalone") {
+        const title = (params.title as string) || pluginId
+        _openTab(pluginId, title, (params.icon as string) || "package")
+      }
+
+      return { ok: true, pluginId, ...result, message: `Plugin "${pluginId}" built and opened.` }
+    } catch (err) {
+      return { error: String(err) }
+    }
+  }
+
+  // plugin.list — list all installed plugins
+  if (tool === "plugin.list") {
+    try {
+      const res = await fetch("/api/plugins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list" }),
+      })
+      return await res.json()
+    } catch (err) {
+      return { error: String(err) }
+    }
+  }
+
+  // plugin.install-deps — install npm packages for a plugin
+  if (tool === "plugin.install-deps") {
+    const pluginId = params.pluginId as string
+    const deps = params.deps as Record<string, string>
+    if (!pluginId || !deps) return { error: "pluginId and deps are required" }
+
+    try {
+      const res = await fetch("/api/plugins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "install-deps", pluginId, deps }),
+      })
+      return await res.json()
+    } catch (err) {
+      return { error: String(err) }
+    }
+  }
+
+  // view.clone — read built-in view source code so agent can fork it
+  if (tool === "view.clone") {
+    const viewId = params.viewId as string
+    if (!viewId) return { error: "viewId is required" }
+
+    try {
+      const res = await fetch("/api/plugins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clone-view", viewId }),
+      })
+      const data = await res.json() as { source?: string; error?: string; viewId?: string }
+      if (data.error) return data
+
+      return {
+        ok: true,
+        viewId,
+        source: data.source,
+        message:
+          `Source of built-in view "${viewId}" returned. ` +
+          `To fork it: plugin.write the code to a new pluginId, then plugin.build.`,
+      }
+    } catch (err) {
+      return { error: String(err) }
+    }
+  }
+
+  // ── Orchestration tools ──────────────────────────────────────────────────────
+
+  // agent.status — return current state of all agents (excluding orchestrator)
+  if (tool === "agent.status") {
+    const state = useGatewayStore.getState()
+    return {
+      agents: state.agents
+        .filter((a) => a.id !== ORCHESTRATOR_AGENT_ID)
+        .map((a) => ({
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          status: a.status,
+          currentTask: a.currentTask,
+          model: a.model,
+          provider: a.provider ?? "openclaw",
+        })),
+      connected: state.connected,
+      mockMode: state.mockMode,
+    }
+  }
+
+  // agent.delegate — send a message to another agent on behalf of the orchestrator
+  if (tool === "agent.delegate") {
+    const agentId = params.agentId as string | undefined
+    const agentName = params.agentName as string | undefined
+    const message = params.message as string
+    const createNewSession = params.createSession as boolean | undefined
+
+    if (!message) return { error: "message is required" }
+
+    const state = useGatewayStore.getState()
+    const targetAgent = agentId
+      ? state.agents.find((a) => a.id === agentId)
+      : state.agents.find((a) => a.name.toLowerCase() === agentName?.toLowerCase())
+
+    if (!targetAgent) {
+      return {
+        error: `Agent not found: ${agentId ?? agentName}`,
+        availableAgents: state.agents
+          .filter((a) => a.id !== ORCHESTRATOR_AGENT_ID)
+          .map((a) => ({ id: a.id, name: a.name, role: a.role, status: a.status })),
+      }
+    }
+
+    // Get or create a session for the target agent
+    let sessionId: string
+    if (createNewSession) {
+      sessionId = state.createSession(targetAgent.id, `Delegated: ${message.slice(0, 40)}`)
+    } else {
+      const existing = state.sessions
+        .filter((s) => s.agentId === targetAgent.id)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      sessionId = existing?.id ?? state.createSession(targetAgent.id)
+    }
+
+    // Add a visible user message to the store so it shows up in ChatsView
+    state.addMessage(targetAgent.id, {
+      id: uid(),
+      agentId: targetAgent.id,
+      sessionId,
+      role: "user",
+      content: `[Delegated by Orchestrator]\n\n${message}`,
+      timestamp: Date.now(),
+    })
+
+    // Send to gateway
+    state.send({
+      type: "agent.message",
+      agentId: targetAgent.id,
+      sessionId,
+      content: message,
+    })
+
+    return {
+      ok: true,
+      agentId: targetAgent.id,
+      agentName: targetAgent.name,
+      sessionId,
+      message: `Delegated to ${targetAgent.name} (${targetAgent.role})`,
+    }
+  }
+
+  // chat.open — open the Chats view focused on a specific agent
+  if (tool === "chat.open") {
+    const agentId = params.agentId as string | undefined
+    const agentName = params.agentName as string | undefined
+    const sessionId = params.sessionId as string | undefined
+
+    const state = useGatewayStore.getState()
+    const targetAgent = agentId
+      ? state.agents.find((a) => a.id === agentId)
+      : state.agents.find((a) => a.name.toLowerCase() === agentName?.toLowerCase())
+
+    if (!targetAgent) {
+      return { error: `Agent not found: ${agentId ?? agentName}` }
+    }
+
+    if (_openTab) {
+      _openTab("chats", `Chat: ${targetAgent.name}`, "message-square", {
+        agentId: targetAgent.id,
+        sessionId,
+      })
+    }
+
+    return { ok: true, agentId: targetAgent.id, agentName: targetAgent.name }
+  }
+
+  // ── Media / todo fallback ────────────────────────────────────────────────────
 
   try {
     const res = await fetch("/api/media/mcp", {
@@ -638,9 +906,41 @@ function extractAgentId(sessionKey: string | undefined): string {
   return sessionKey
 }
 
+/**
+ * Ensure the Studio orchestrator agent always exists in the agents list.
+ * Called after connect (mock or live) and preserved through disconnects.
+ */
+function ensureOrchestratorAgent() {
+  if (!_storeSet) return
+  _storeSet((s) => {
+    if (s.agents.some((a) => a.id === ORCHESTRATOR_AGENT_ID)) return {}
+    return {
+      agents: [
+        {
+          id: ORCHESTRATOR_AGENT_ID,
+          name: "Studio",
+          status: "online" as const,
+          role: "orchestrator" as const,
+          model: "claude-sonnet-4-6",
+          currentTask: null,
+          tokensToday: 0,
+          tokensTotal: 0,
+          uptime: 0,
+          config: { reserved: true },
+          provider: undefined,
+        },
+        ...s.agents,
+      ],
+    }
+  })
+}
+
 export const useGatewayStore = create<GatewayState>((set, get) => {
   // Initialize module-level store accessor so executeMediaTool can mutate state
   _storeSet = set
+  // Ensure the orchestrator agent exists on every store initialization
+  // (deferred to next tick so _storeSet is set first)
+  setTimeout(ensureOrchestratorAgent, 0)
 
   /**
    * Handle events from the mock gateway (our custom protocol).
@@ -648,10 +948,10 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
   function handleMockEvent(event: GatewayEvent) {
     switch (event.type) {
       case "agents.snapshot":
-        // Preserve OpenCode agents — mock snapshot only replaces mock/openclaw agents
+        // Preserve OpenCode agents and the orchestrator agent
         set((s) => ({
           agents: [
-            ...s.agents.filter((a) => a.provider === "opencode"),
+            ...s.agents.filter((a) => a.provider === "opencode" || a.id === ORCHESTRATOR_AGENT_ID),
             ...event.agents,
           ],
         }))
@@ -800,6 +1100,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       set({ connected: true, connectionError: null })
       // Fetch initial data after handshake
       fetchInitialData()
+      ensureOrchestratorAgent()
       return
     }
     if (frame.type === "_error") {
@@ -1349,6 +1650,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       })
       persistConfig("mock://localhost", "", true)
       mockGateway.connect()
+      ensureOrchestratorAgent()
     },
 
     disconnect() {
@@ -1360,17 +1662,18 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         mockGateway.disconnect()
         mockGateway = null
       }
-      set({
+      set((s) => ({
         connected: false,
         connectionError: null,
-        agents: [],
+        // Keep the orchestrator agent so it's always accessible
+        agents: s.agents.filter((a) => a.id === ORCHESTRATOR_AGENT_ID),
         events: [],
         tasks: [],
         messages: {},
         // sessions intentionally preserved across disconnect so chat history survives reconnects
         presence: {},
         models: [],
-      })
+      }))
     },
 
     /**
@@ -1388,10 +1691,12 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       // Translate our GatewayMessage types to OpenClaw RPC calls
       switch (msg.type) {
         case "agent.message": {
-          // Prepend media tools prompt on first message to each agent
+          // Prepend system prompt on first message to each agent
+          // Orchestrator gets a richer coordination-focused prompt; others get the standard media tools prompt
           let messageContent = msg.content
           if (!mediaPromptSent.has(msg.agentId)) {
-            messageContent = `[System: ${MEDIA_TOOLS_PROMPT}]\n\n${msg.content}`
+            const systemPrompt = msg.agentId === ORCHESTRATOR_AGENT_ID ? ORCHESTRATOR_PROMPT : MEDIA_TOOLS_PROMPT
+            messageContent = `[System: ${systemPrompt}]\n\n${msg.content}`
             mediaPromptSent.add(msg.agentId)
           }
 

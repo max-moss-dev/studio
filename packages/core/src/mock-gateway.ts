@@ -7,6 +7,7 @@ import {
   generateRandomEvent,
   uid,
 } from "./mock-data"
+import { ORCHESTRATOR_AGENT_ID } from "./prompts/orchestrator"
 
 type Listener = (event: GatewayEvent) => void
 
@@ -120,7 +121,11 @@ export class MockGateway {
 
       case "agent.message": {
         // Simulate streaming agent response (token-by-token like real gateway)
-        const fullText = `I received your message. Processing: "${msg.content.slice(0, 50)}..."\n\nHere's what I can help you with:\n- **Task coordination** across agents\n- **Code review** and implementation guidance\n- **Research** and analysis of technical topics\n- **Workflow orchestration** for complex multi-step tasks\n\nLet me know how I can assist you.`
+        const isOrchestrator = msg.agentId === ORCHESTRATOR_AGENT_ID
+        const agentList = this.agents.map((a) => `**${a.name}** (${a.role}, ${a.status})`).join(", ")
+        const fullText = isOrchestrator
+          ? `I'm Studio, your workspace orchestrator. I have visibility into ${this.agents.length} agent${this.agents.length !== 1 ? "s" : ""}: ${agentList || "none yet"}.\n\nI can delegate tasks, track progress on the Kanban board, create new views, and coordinate work across the entire workspace. What would you like me to work on?`
+          : `I received your message. Processing: "${msg.content.slice(0, 50)}..."\n\nHere's what I can help you with:\n- **Task coordination** across agents\n- **Code review** and implementation guidance\n- **Research** and analysis of technical topics\n- **Workflow orchestration** for complex multi-step tasks\n\nLet me know how I can assist you.`
         const messageId = uid()
         const agentId = msg.agentId
         const words = fullText.split(/(\s+)/)

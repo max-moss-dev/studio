@@ -4,7 +4,14 @@ Track ongoing and planned work across the Studio project.
 
 ## In Progress
 
-- [ ] Build View Builder — code editor + embedded chat + live Sandpack preview
+- [ ] Global Orchestrator Sidebar — test full flow end-to-end
+  - agent.status, agent.delegate, chat.open tool calls
+  - Mock streaming responses
+  - Sidebar persistence across view switches
+- Build logs view etc, so orckestator has instant access to the error logs happening in the app, can we put browser console logs there?
+
+## Backlog — Plugin System
+- [ ] Test full plugin flow: agent writes plugin → plugin.build → renders natively with store access
 
 ## Backlog
 - Запамятати дані входу в openclaw gateway для натсупних разів
@@ -60,7 +67,43 @@ Track ongoing and planned work across the Studio project.
 - [x] Add streaming test (`packages/core/src/__tests__/streaming.test.ts`)
 - [x] Install Playwright MCP for browser testing
 
+- [x] Global Orchestrator Sidebar (feat/plugin-system branch)
+  - [x] `packages/core/src/prompts/orchestrator.ts` — ORCHESTRATOR_AGENT_ID + ORCHESTRATOR_PROMPT
+  - [x] `src/stores/orchestrator-store.ts` — isOpen, sessionId persistence
+  - [x] `src/components/chat/message-row.tsx` — shared MessageRow, ToolResultBlock, InlineToolCall
+  - [x] `src/components/orchestrator-sidebar.tsx` — always-present right sidebar with send logic
+  - [x] `src/components/app-shell.tsx` — horizontal flex layout, OrchestratorSidebar added
+  - [x] `src/components/header.tsx` — OrchestratorToggleButton added
+  - [x] `src/hooks/use-keyboard-shortcuts.ts` — Cmd+Shift+O toggle
+  - [x] gateway-store: agent.status, agent.delegate, chat.open tools
+  - [x] gateway-store: ensureOrchestratorAgent (always present, survives disconnect)
+  - [x] gateway-store: orchestrator gets ORCHESTRATOR_PROMPT instead of MEDIA_TOOLS_PROMPT
+  - [x] mock-gateway: orchestrator-aware streaming responses
+  - [x] chats view: filter orchestrator from agent picker, import shared MessageRow
+
+- [x] Level 4 Plugin System (branch: feat/plugin-system)
+  - [x] `plugins/_runtime/react.mjs` — shared React instance shim
+  - [x] `plugins/_runtime/studio-store.mjs` — shared store shim
+  - [x] `plugins/_runtime/lucide-react.mjs` — shared icons shim
+  - [x] `src/app/api/plugins/route.ts` — plugin API (write, build, list, clone-view, install-deps, delete)
+  - [x] `src/stores/plugin-store.ts` — Zustand store for installed plugins
+  - [x] `src/components/plugin-slot.tsx` — `<PluginSlot name="chats.sidebar" />` injection points
+  - [x] `src/components/bundled-view.tsx` — renders esbuild-compiled plugin bundles
+  - [x] `src/components/runtime-view.tsx` — renders single-file AI views via sucrase
+  - [x] `window.__studioPluginRegister` global — registered in AppShell for client-side plugin activation
+  - [x] PluginSlot added to Chats view: `chats.sidebar`, `chats.toolbar`
+  - [x] gateway-store: plugin.write, plugin.build, plugin.list, plugin.install-deps, view.clone tool handlers
+  - [x] MEDIA_TOOLS_PROMPT updated with plugin tool documentation
+  - [x] view-builder.ts prompt updated with full plugin system docs
+
 ## Key Architecture Decisions
+
+- **Global Orchestrator**: Persistent right-side sidebar (`OrchestratorSidebar`) always visible across all views. Hosts a reserved "Studio" agent (id: `studio-orchestrator`) that's auto-created on connect and survives disconnects. The orchestrator gets a special `ORCHESTRATOR_PROMPT` (vs `MEDIA_TOOLS_PROMPT` for other agents) emphasizing delegation. Three new tools: `agent.status` (see all agents), `agent.delegate` (send work to another agent + creates session + adds message to ChatsView), `chat.open` (focus Chats view on an agent). Toggle: `OrchestratorToggleButton` in header or `Cmd+Shift+O`.
+
+- **Plugin system (Level 4)**: Two plugin execution modes — (1) sucrase runtime transpiler for single-file AI-generated views (`view.update` tool → `RuntimeView`); (2) esbuild server-side bundler for full multi-file plugins with npm deps (`plugin.write` + `plugin.build` → `BundledView`). Both share the same React/store instances via `globalThis.__studio_react` shims. Plugin types: `standalone` (new tab), `override` (replaces built-in view), `extension` (injects into `PluginSlot` in built-in views).
+- **Plugin registration**: After `plugin.build` succeeds, gateway-store calls `window.__studioPluginRegister(id, manifest)` which was injected by AppShell. This registers the plugin in plugin-store (Zustand) and marks it as built. The component cache is cleared so next load fetches the new bundle.
+- **Plugin slots**: `<PluginSlot name="chats.sidebar" />` in built-in views renders all "extension" type plugins that declare that slot. Currently wired in: `chats.sidebar`, `chats.toolbar`.
+
 
 - **Streaming**: Gateway sends two event types: `event:"agent"` (every token, `data.text` cumulative) and `event:"chat"` (periodic, `message.content[]`). Both handled in gateway-store.
 - **Tool calls**: Agent embeds ` ```tool ` blocks in text. `splitContentAndTools()` in gateway-store splits raw text into clean `content` + `toolCalls[]` + `isToolStreaming` at the store level. React components never parse tool blocks.
