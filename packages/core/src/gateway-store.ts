@@ -228,8 +228,13 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
       _storeSet((s) => ({ tasks: [...s.tasks, task] }))
     }
     // Auto-open kanban so user can see the new task
-    if (_openTab) _openTab("kanban", "Task Board", "layout-list")
-    return { ok: true, taskId: task.id, message: `Task "${title}" created on Kanban board` }
+    if (_openTab) {
+      console.log("[executeMediaTool] Opening Kanban view for new task:", title)
+      _openTab("kanban", "Task Board", "layout-list")
+    } else {
+      console.warn("[executeMediaTool] _openTab is not set, cannot open Kanban view")
+    }
+    return { ok: true, taskId: task.id, message: `Task "${title}" created on Kanban board`, viewOpened: !!_openTab }
   }
 
   // task.list — Get all tasks and their status
@@ -1756,7 +1761,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           let messageContent = msg.content
           if (!mediaPromptSent.has(msg.agentId)) {
             const systemPrompt = msg.agentId === ORCHESTRATOR_AGENT_ID ? ORCHESTRATOR_PROMPT : MEDIA_TOOLS_PROMPT
-            messageContent = `[System: ${systemPrompt}]\n\n${msg.content}`
+            messageContent = `<system>\n${systemPrompt}\n</system>\n\n<user>\n${msg.content}\n</user>\n\nYou MUST respond with tool calls. Do NOT explain. Use \`\`\`tool\`\`\` blocks NOW:`
             mediaPromptSent.add(msg.agentId)
           }
 

@@ -333,10 +333,14 @@ export function AppShell() {
 
   // Wire up view store accessors for the gateway tool proxy
   useEffect(() => {
+    console.log("[AppShell] Setting view store accessors")
     setViewStoreAccessors(
       (view) => registerView(view as unknown as import("@/lib/types").ViewDefinition),
       (id) => getView(id) as Record<string, unknown> | undefined,
-      (viewId, title, icon, state) => openTab(viewId, title, icon, state)
+      (viewId, title, icon, state) => {
+        console.log("[AppShell] openTab called:", viewId, title, icon)
+        return openTab(viewId, title, icon, state)
+      }
     )
   }, [registerView, getView, openTab])
 

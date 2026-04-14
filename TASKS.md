@@ -15,6 +15,7 @@ Track ongoing and planned work across the Studio project.
 
 ## Backlog — Plugin System
 - також кнопка почстити чат не працює повноцінно. чат не чиститься повнстю поки не перезавантажу сторінку
+- якщо це не буде працювати будемо робити план б - інтеграція з ollama, в новій вітці
 - [ ] Test full plugin flow: agent writes plugin → plugin.build → renders natively with store access
 
 ## Backlog
