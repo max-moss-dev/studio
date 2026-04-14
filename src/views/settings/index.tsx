@@ -30,9 +30,7 @@ export default function SettingsView() {
   const [opencodeChecking, setOpencodeChecking] = useState(false)
 
   const connected = useGatewayStore((s) => s.connected)
-  const mockMode = useGatewayStore((s) => s.mockMode)
   const connectGateway = useGatewayStore((s) => s.connectGateway)
-  const connectMock = useGatewayStore((s) => s.connectMock)
   const disconnect = useGatewayStore((s) => s.disconnect)
 
   useEffect(() => { setConfig(loadProviders()) }, [])
@@ -47,7 +45,7 @@ export default function SettingsView() {
 
   // --- Disconnect ---
   function handleDisconnect(id: ProviderId) {
-    if (id === "openclaw" && connected && !mockMode) {
+    if (id === "openclaw" && connected) {
       disconnect()
       try { localStorage.removeItem("openclaw-gateway-config") } catch {}
     }
@@ -77,7 +75,6 @@ export default function SettingsView() {
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error || data.details || "Connection failed")
       updateProvider("opencode", { enabled: true })
-      if (!connected) connectMock()
     } catch (err) {
       setLoginError((s) => ({ ...s, opencode: err instanceof Error ? err.message : String(err) }))
     } finally {
@@ -87,7 +84,7 @@ export default function SettingsView() {
 
   function isConnected(id: ProviderId): boolean {
     if (!config[id].enabled) return false
-    if (id === "openclaw") return connected && !mockMode
+    if (id === "openclaw") return connected
     return true // opencode: enabled = connected (we ping on connect)
   }
 

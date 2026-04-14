@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Bot, Send, Loader2, GripVertical, Zap, Terminal, MessageSquare, Users, ChevronLeft, Layers, Trash2 } from "lucide-react"
+import { Bot, Send, Loader2, GripVertical, Zap, Terminal, MessageSquare, Users, ChevronLeft, Layers, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useGatewayStore } from "@/stores/gateway-store"
@@ -40,6 +40,7 @@ export function OrchestratorSidebar() {
   const sessions = useGatewayStore((s) => s.sessions)
   const createSession = useGatewayStore((s) => s.createSession)
   const addMessage = useGatewayStore((s) => s.addMessage)
+  const clearMessages = useGatewayStore((s) => s.clearMessages)
   const send = useGatewayStore((s) => s.send)
   const allMessages = useGatewayStore((s) => s.messages)
   const agents = useGatewayStore((s) => s.agents)
@@ -242,16 +243,7 @@ export function OrchestratorSidebar() {
               <button
                 onClick={() => {
                   if (confirm("Clear all messages?")) {
-                    const state = useGatewayStore.getState()
-                    state.messages[ORCHESTRATOR_AGENT_ID] = []
-                    state.addMessage(ORCHESTRATOR_AGENT_ID, {
-                      id: uid(),
-                      agentId: ORCHESTRATOR_AGENT_ID,
-                      sessionId: sessionId ?? undefined,
-                      role: "assistant",
-                      content: "Chat cleared. How can I help you?",
-                      timestamp: Date.now(),
-                    })
+                    clearMessages(ORCHESTRATOR_AGENT_ID)
                   }
                 }}
                 className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"

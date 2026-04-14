@@ -36,14 +36,8 @@ export {
 // WebSocket client
 export { WsClient } from "./ws-client"
 
-// Mock gateway (for development)
-export { MockGateway } from "./mock-gateway"
+// Utilities
 export {
-  MOCK_AGENTS,
-  MOCK_TASKS,
-  MOCK_MESSAGES,
-  MOCK_EVENTS,
-  generateRandomEvent,
   uid,
 } from "./mock-data"
 

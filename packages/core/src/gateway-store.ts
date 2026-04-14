@@ -14,7 +14,6 @@ import type {
   ChatSession,
 } from "./types"
 import { WsClient } from "./ws-client"
-import { MockGateway } from "./mock-gateway"
 import { uid } from "./mock-data"
 import { VIEW_BUILDER_PROMPT } from "./prompts/view-builder"
 import { ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_PROMPT } from "./prompts/orchestrator"
@@ -509,7 +508,6 @@ export async function executeMediaTool(tool: string, params: Record<string, unkn
           provider: a.provider ?? "openclaw",
         })),
       connected: state.connected,
-      mockMode: state.mockMode,
     }
   }
 
@@ -790,7 +788,6 @@ interface GatewayState {
   url: string
   apiKey: string
   connected: boolean
-  mockMode: boolean
   connectionError: ConnectionError | null
 
   // Data
@@ -808,12 +805,12 @@ interface GatewayState {
 
   // Actions
   connectGateway: (url: string, apiKey: string) => void
-  connectMock: () => void
   disconnect: () => void
   clearError: () => void
   send: (msg: GatewayMessage) => void
   sendToGateway: (method: string, params?: Record<string, unknown>) => Promise<unknown>
   addMessage: (agentId: string, message: Message) => void
+  clearMessages: (agentId: string) => void
   fetchOpenCodeAgents: (serverUrl: string) => Promise<void>
   createOpenCodeAgent: (serverUrl: string, config: OpenCodeAgentConfig) => Promise<void>
   fetchOpenCodeModels: (serverUrl: string) => Promise<void>
@@ -824,13 +821,12 @@ interface GatewayState {
 }
 
 let wsClient: WsClient | null = null
-let mockGateway: MockGateway | null = null
 
-function persistConfig(url: string, apiKey: string, mockMode: boolean) {
+function persistConfig(url: string, apiKey: string) {
   try {
     localStorage.setItem(
       "openclaw-gateway-config",
-      JSON.stringify({ url, apiKey, mockMode })
+      JSON.stringify({ url, apiKey })
     )
   } catch {
     // localStorage unavailable
@@ -865,11 +861,13 @@ function loadPersistedMessages(): Record<string, Message[]> {
 export function loadPersistedConfig(): {
   url: string
   apiKey: string
-  mockMode: boolean
 } | null {
   try {
     const raw = localStorage.getItem("openclaw-gateway-config")
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return { url: parsed.url ?? "", apiKey: parsed.apiKey ?? "" }
+    }
   } catch {
     // ignore
   }
@@ -1719,38 +1717,15 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       wsClient = new WsClient()
       wsClient.onMessage(handleGatewayFrame)
 
-      set({ url, apiKey, mockMode: false, connectionError: null, messages: loadPersistedMessages() })
-      persistConfig(url, apiKey, false)
+      set({ url, apiKey, connectionError: null, messages: loadPersistedMessages() })
+      persistConfig(url, apiKey)
       wsClient.connect(url, apiKey)
-    },
-
-    connectMock() {
-      get().disconnect()
-
-      mockGateway = new MockGateway()
-      mockGateway.onMessage(handleMockEvent)
-
-      const initialMessages = mockGateway.getMessages()
-      set({
-        url: "mock://localhost",
-        apiKey: "",
-        connected: true,
-        mockMode: true,
-        messages: initialMessages,
-      })
-      persistConfig("mock://localhost", "", true)
-      mockGateway.connect()
-      ensureOrchestratorAgent()
     },
 
     disconnect() {
       if (wsClient) {
         wsClient.disconnect()
         wsClient = null
-      }
-      if (mockGateway) {
-        mockGateway.disconnect()
-        mockGateway = null
       }
       set((s) => ({
         connected: false,
@@ -1767,14 +1742,9 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     },
 
     /**
-     * Send a message using the appropriate protocol.
-     * Mock mode uses our custom protocol; live mode translates to OpenClaw RPC.
+     * Send a message using the OpenClaw RPC protocol.
      */
     send(msg: GatewayMessage) {
-      if (get().mockMode && mockGateway) {
-        mockGateway.send(msg)
-        return
-      }
 
       if (!wsClient) return
 
@@ -2080,6 +2050,15 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             [agentId]: [...msgs, message],
           },
         }
+      })
+    },
+
+    clearMessages(agentId: string) {
+      set((s) => {
+        const newMessages = { ...s.messages }
+        delete newMessages[agentId]
+        persistMessages(newMessages)
+        return { messages: newMessages }
       })
     },
 

@@ -14,6 +14,7 @@ Track ongoing and planned work across the Studio project.
 - Build logs view etc, so orchestrator has instant access to the error logs happening in the app, can we put browser console logs there?
 
 ## Backlog — Plugin System
+- також кнопка почстити чат не працює повноцінно. чат не чиститься повнстю поки не перезавантажу сторінку
 - [ ] Test full plugin flow: agent writes plugin → plugin.build → renders natively with store access
 
 ## Backlog
