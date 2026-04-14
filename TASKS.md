@@ -14,6 +14,17 @@ Track ongoing and planned work across the Studio project.
 
 ## Completed (this session)
 
+- [x] OpenCode chat responses are clean text (fixed raw JSON display — extractText() reads parts array)
+- [x] Per-agent OpenCode sessions — Map<agentId, sessionId> replaces single shared ref
+- [x] Studio tools system prompt injected on first message to OpenCode agents
+- [x] create_task tool — creates task on Kanban board + auto-opens Task Board tab
+- [x] open_view tool — opens any Studio view as a tab
+- [x] Tool call UI — wrench icon + collapsible "Tool result" blocks in chat
+- [x] OpenClaw WebSocket streaming — Thinking placeholder, token streaming, final message
+- [x] Session persistence fix — disconnect no longer wipes localStorage sessions
+- [x] fetchInitialData no longer overwrites Studio sessions with gateway sessions
+- [x] OpenCode agent model display fixed — uses global config default as fallback for agents without explicit model
+
 - [x] Provider-aware agent creation — Agent Manager now supports both OpenClaw and OpenCode
 - [x] Added `ProviderSource`, `OpenCodeAgentConfig`, `OpenCodeModelInfo` types
 - [x] Extended `Agent.provider` field to track which gateway an agent comes from

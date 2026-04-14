@@ -23,7 +23,15 @@ export type {
 
 // Gateway store
 export type { ConnectionError } from "./gateway-store"
-export { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "./gateway-store"
+export {
+  useGatewayStore,
+  loadPersistedConfig,
+  setViewStoreAccessors,
+  parseToolCalls,
+  splitContentAndTools,
+  executeMediaTool,
+  MEDIA_TOOLS_PROMPT,
+} from "./gateway-store"
 
 // WebSocket client
 export { WsClient } from "./ws-client"

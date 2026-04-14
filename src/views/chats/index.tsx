@@ -36,7 +36,7 @@ import {
 import { cn } from "@/lib/utils"
 import { uid } from "@/lib/mock-data"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
-import { useGatewayStore } from "@/stores/gateway-store"
+import { useGatewayStore, parseToolCalls, splitContentAndTools, executeMediaTool, MEDIA_TOOLS_PROMPT } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
 import { loadProviders } from "@/lib/providers"
 
@@ -310,8 +310,10 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
     prevMsgCountRef.current = sessionMessages.length
   }, [sessionMessages.length])
 
-  // OpenCode session tracking (persisted across renders)
-  const opencodeSessionRef = useRef<string | null>(null)
+  // OpenCode session tracking per agent — Map<agentId, openCodeSessionId>
+  const opencodeSessionsRef = useRef<Map<string, string>>(new Map())
+  // Track which OpenCode agents have received the Studio tools system prompt
+  const opencodePromptSentRef = useRef<Set<string>>(new Set())
 
   function handleCreateNewSession() {
     if (!selectedAgentForNewSession) return
@@ -355,9 +357,9 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       updatedAt: Date.now(),
     })
 
-    // Check if OpenCode is enabled — route through OpenCode API
+    // Route to OpenCode only if this agent belongs to OpenCode provider
     const providers = loadProviders()
-    if (providers.opencode.enabled && providers.opencode.url) {
+    if (selectedAgent.provider === "opencode" && providers.opencode.url) {
       await sendViaOpenCode(selectedAgent.id, content, providers.opencode.url, selectedSession.id)
       return
     }
@@ -366,18 +368,85 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
     send({
       type: "agent.message",
       agentId: selectedAgent.id,
+      sessionId: selectedSession.id,
       content,
     })
   }
 
-  async function sendViaOpenCode(agentId: string, content: string, serverUrl: string, _sessionId: string) {
+  /** Extract plain text from an OpenCode message object (parts array or content string). */
+  function extractText(msg: unknown): string {
+    if (!msg || typeof msg !== "object") return ""
+    const m = msg as Record<string, unknown>
+    if (Array.isArray(m.parts)) {
+      return (m.parts as Array<{ type?: string; text?: string }>)
+        .filter((p) => p.type === "text")
+        .map((p) => p.text ?? "")
+        .join("")
+    }
+    if (typeof m.content === "string") return m.content
+    if (Array.isArray(m.content)) {
+      return (m.content as Array<{ type?: string; text?: string }>)
+        .filter((c) => c.type === "text")
+        .map((c) => c.text ?? "")
+        .join("")
+    }
+    return ""
+  }
+
+  /** Finalize an OpenCode message: clean content, execute tool calls, add result messages. */
+  async function finalizeOpenCodeMessage(
+    agentId: string,
+    studioSessionId: string,
+    msgId: string,
+    rawText: string
+  ) {
+    const { content, toolCalls } = splitContentAndTools(rawText)
+
+    useGatewayStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [agentId]: (s.messages[agentId] ?? []).map((m) =>
+          m.id === msgId
+            ? { ...m, content, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, isStreaming: false, isToolStreaming: false }
+            : m
+        ),
+      },
+    }))
+
+    // Execute tool calls and add result messages
+    const parsedTools = parseToolCalls(rawText)
+    for (const tc of parsedTools) {
+      const result = await executeMediaTool(tc.tool, tc.params)
+      const resultContent = `Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+      useGatewayStore.setState((s) => ({
+        messages: {
+          ...s.messages,
+          [agentId]: [
+            ...(s.messages[agentId] ?? []),
+            {
+              id: uid(),
+              agentId,
+              sessionId: studioSessionId,
+              role: "tool" as const,
+              content: resultContent,
+              timestamp: Date.now(),
+            },
+          ],
+        },
+      }))
+    }
+  }
+
+  async function sendViaOpenCode(agentId: string, content: string, serverUrl: string, studioSessionId: string) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "x-opencode-url": serverUrl,
     }
 
-    // Create session if we don't have one
-    if (!opencodeSessionRef.current) {
+    // Per-agent OpenCode session tracking
+    let openCodeSessionId = opencodeSessionsRef.current.get(agentId)
+
+    if (!openCodeSessionId) {
       try {
         const res = await fetch("/api/agent/opencode", {
           method: "POST",
@@ -385,26 +454,28 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
           body: JSON.stringify({ action: "create" }),
         })
         const data = await res.json()
-        opencodeSessionRef.current = data.id ?? data.sessionId ?? Object.keys(data)[0]
-        if (!opencodeSessionRef.current) {
-          // Try to get from session list
+        openCodeSessionId = data.id ?? data.sessionId ?? Object.keys(data)[0]
+        if (!openCodeSessionId) {
           const listRes = await fetch("/api/agent/opencode", {
             method: "POST",
             headers,
             body: JSON.stringify({ action: "sessions" }),
           })
-          const sessions = await listRes.json()
-          const list = Array.isArray(sessions) ? sessions : sessions.sessions ?? Object.values(sessions)
+          const sessionsData = await listRes.json()
+          const list = Array.isArray(sessionsData) ? sessionsData : sessionsData.sessions ?? Object.values(sessionsData)
           if (list.length > 0) {
             const last = list[list.length - 1]
-            opencodeSessionRef.current = typeof last === "string" ? last : last.id ?? last.sessionId
+            openCodeSessionId = typeof last === "string" ? last : last.id ?? last.sessionId
           }
+        }
+        if (openCodeSessionId) {
+          opencodeSessionsRef.current.set(agentId, openCodeSessionId)
         }
       } catch (err) {
         addMessage(agentId, {
           id: uid(),
           agentId,
-          sessionId: _sessionId,
+          sessionId: studioSessionId,
           role: "assistant",
           content: `Failed to create OpenCode session: ${err instanceof Error ? err.message : String(err)}`,
           timestamp: Date.now(),
@@ -413,12 +484,11 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       }
     }
 
-    const openCodeSessionId = opencodeSessionRef.current
     if (!openCodeSessionId) {
       addMessage(agentId, {
         id: uid(),
         agentId,
-        sessionId: _sessionId,
+        sessionId: studioSessionId,
         role: "assistant",
         content: "No OpenCode session available.",
         timestamp: Date.now(),
@@ -426,43 +496,51 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
       return
     }
 
-    // Add "thinking" placeholder
+    // Inject Studio tools system prompt on first message for this agent
+    let messageContent = content
+    if (!opencodePromptSentRef.current.has(agentId)) {
+      opencodePromptSentRef.current.add(agentId)
+      messageContent = `[System: You are an AI assistant integrated with Studio. ${MEDIA_TOOLS_PROMPT}]\n\n${content}`
+    }
+
+    // Add streaming placeholder
     const assistantMsgId = uid()
     addMessage(agentId, {
       id: assistantMsgId,
       agentId,
-      sessionId: _sessionId,
+      sessionId: studioSessionId,
       role: "assistant",
       content: "",
       isStreaming: true,
       timestamp: Date.now(),
     })
 
-    // Send prompt
     try {
       const res = await fetch("/api/agent/opencode", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ action: "prompt", sessionId: openCodeSessionId, content }),
+        headers: { ...headers, "Accept": "text/event-stream" },
+        body: JSON.stringify({ action: "prompt", sessionId: openCodeSessionId, content: messageContent }),
       })
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-        useGatewayStore.getState().addMessage(agentId, {
-          id: assistantMsgId,
-          agentId,
-          sessionId: _sessionId,
-          role: "assistant",
-          content: `OpenCode error: ${errData.error ?? errData.details ?? "Unknown error"}`,
-          timestamp: Date.now(),
-        })
+        useGatewayStore.setState((s) => ({
+          messages: {
+            ...s.messages,
+            [agentId]: (s.messages[agentId] ?? []).map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: `OpenCode error: ${errData.error ?? errData.details ?? "Unknown error"}`, isStreaming: false }
+                : m
+            ),
+          },
+        }))
         return
       }
 
-      // Check if streaming
-      const contentType = res.headers.get("content-type") ?? ""
-      if (contentType.includes("text/event-stream") && res.body) {
-        // Read SSE stream
+      const responseContentType = res.headers.get("content-type") ?? ""
+
+      if (responseContentType.includes("text/event-stream") && res.body) {
+        // SSE streaming path
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let fullText = ""
@@ -472,51 +550,43 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
           if (done) break
           const chunk = decoder.decode(value, { stream: true })
 
-          // Parse SSE events
           for (const line of chunk.split("\n")) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6)
-              if (data === "[DONE]") continue
-              try {
-                const event = JSON.parse(data)
-                // Extract text from various event formats
-                const text = event.content ?? event.text ?? event.delta?.text ?? event.message?.content ?? ""
-                if (text) {
-                  fullText += text
-                  // Update message in store
-                  useGatewayStore.setState((s) => ({
-                    messages: {
-                      ...s.messages,
-                      [agentId]: (s.messages[agentId] ?? []).map((m) =>
-                        m.id === assistantMsgId
-                          ? { ...m, content: fullText, isStreaming: true }
-                          : m
-                      ),
-                    },
-                  }))
+            if (!line.startsWith("data: ")) continue
+            const data = line.slice(6)
+            if (data === "[DONE]") continue
+            try {
+              const event = JSON.parse(data)
+              if (event.parts && Array.isArray(event.parts)) {
+                for (const part of event.parts) {
+                  if (part.type === "text" && part.text) fullText += part.text
                 }
-              } catch { /* skip non-JSON lines */ }
-            }
+              } else {
+                const text = event.content ?? event.text ?? event.delta?.text ?? ""
+                if (text) fullText += text
+              }
+              if (fullText) {
+                const { content: cleanContent, toolCalls, isToolStreaming, streamingToolName } = splitContentAndTools(fullText)
+                useGatewayStore.setState((s) => ({
+                  messages: {
+                    ...s.messages,
+                    [agentId]: (s.messages[agentId] ?? []).map((m) =>
+                      m.id === assistantMsgId
+                        ? { ...m, content: cleanContent, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, isToolStreaming, streamingToolName, isStreaming: true }
+                        : m
+                    ),
+                  },
+                }))
+              }
+            } catch { /* skip non-JSON SSE lines */ }
           }
         }
 
-        // Mark as done
-        useGatewayStore.setState((s) => ({
-          messages: {
-            ...s.messages,
-            [agentId]: (s.messages[agentId] ?? []).map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, isStreaming: false }
-                : m
-            ),
-          },
-        }))
+        await finalizeOpenCodeMessage(agentId, studioSessionId, assistantMsgId, fullText)
       } else {
-        // Non-streaming: read full response, then poll messages
+        // Non-streaming: poll messages after response
         const responseData = await res.json()
-
-        // Wait a bit for OpenCode to process, then fetch messages
         await new Promise((r) => setTimeout(r, 1000))
+
         const msgsRes = await fetch("/api/agent/opencode", {
           method: "POST",
           headers,
@@ -524,25 +594,11 @@ export default function ChatsView({ agents, messages: _messages, send, initialAg
         })
         const msgsData = await msgsRes.json()
         const msgList = Array.isArray(msgsData) ? msgsData : msgsData.messages ?? Object.values(msgsData)
+        const lastAssistant = [...msgList].reverse().find((m: { role?: string }) => m.role === "assistant")
+        const rawText = extractText(lastAssistant) || extractText(responseData)
+          || (typeof responseData === "string" ? responseData : JSON.stringify(responseData, null, 2))
 
-        // Find last assistant message
-        const lastAssistant = [...msgList].reverse().find(
-          (m: { role?: string }) => m.role === "assistant"
-        )
-
-        const responseText = lastAssistant?.content
-          ?? (typeof responseData === "string" ? responseData : JSON.stringify(responseData, null, 2))
-
-        useGatewayStore.setState((s) => ({
-          messages: {
-            ...s.messages,
-            [agentId]: (s.messages[agentId] ?? []).map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, content: responseText, isStreaming: false }
-                : m
-            ),
-          },
-        }))
+        await finalizeOpenCodeMessage(agentId, studioSessionId, assistantMsgId, rawText)
       }
     } catch (err) {
       useGatewayStore.setState((s) => ({

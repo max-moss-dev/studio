@@ -66,10 +66,11 @@ export async function POST(request: NextRequest) {
       }
 
       case "prompt": {
+        // OpenCode expects "parts" array, not "content" string
         const res = await fetch(`${baseUrl}/session/${body.sessionId}/message`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: body.content }),
+          headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+          body: JSON.stringify({ parts: [{ type: "text", text: body.content }] }),
         })
 
         if (!res.ok) {

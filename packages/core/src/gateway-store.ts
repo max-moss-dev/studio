@@ -20,7 +20,7 @@ import { VIEW_BUILDER_PROMPT } from "./prompts/view-builder"
 
 // --- Media Tool Proxy ---
 
-const MEDIA_TOOLS_PROMPT = `
+export const MEDIA_TOOLS_PROMPT = `
 You have access to a Media Knowledge Base. You MUST use it proactively:
 
 1. ALWAYS check the knowledge base FIRST when asked about anything — use media.list and media.read before answering.
@@ -60,10 +60,22 @@ Tasks (shared todo list):
 
 ${VIEW_BUILDER_PROMPT}
 
+Studio (app integration):
+- create_task: Create a task on the Kanban board (params: title, status: "queue"|"in_progress"|"review"|"done")
+- open_view: Open a view/tab in the Studio UI (params: view: "kanban"|"agent-manager"|"chats", title)
+
+\`\`\`tool
+{"tool": "create_task", "params": {"title": "Fix login bug", "status": "queue"}}
+\`\`\`
+
+\`\`\`tool
+{"tool": "open_view", "params": {"view": "kanban", "title": "Task Board"}}
+\`\`\`
+
 Tips:
 - Use GFM markdown: tables, task lists (- [ ] / - [x]), code blocks, blockquotes
 - Organize media into folders: notes/, research/, tasks/, summaries/
-- When you discover action items, add them via todo.add
+- When you discover action items, add them via todo.add AND create_task
 - When completing work, mark tasks done via todo.complete
 
 Do NOT wait for the user to ask you to save — proactively write notes, summaries, and findings. Do NOT answer from memory alone — check the knowledge base first.
@@ -72,12 +84,16 @@ Always use the \`\`\`tool code fence format for tool calls.
 
 // Track which agents have received the media tools prompt
 const mediaPromptSent = new Set<string>()
+// Track pending "thinking" placeholder message IDs, keyed by agentId
+const _pendingThinkingByAgent = new Map<string, string>()
+// Module-level store set accessor (initialized inside create() call)
+let _storeSet: ((fn: (s: GatewayState) => Partial<GatewayState>) => void) | null = null
 
 /**
  * Parse tool call blocks from agent message text.
  * Looks for ```tool\n{...}\n``` blocks.
  */
-function parseToolCalls(text: string): Array<{ tool: string; params: Record<string, unknown> }> {
+export function parseToolCalls(text: string): Array<{ tool: string; params: Record<string, unknown> }> {
   const results: Array<{ tool: string; params: Record<string, unknown> }> = []
   const regex = /```tool\s*\n([\s\S]*?)```/g
   let match
@@ -98,7 +114,7 @@ function parseToolCalls(text: string): Array<{ tool: string; params: Record<stri
  * Split raw message text into clean display content and structured tool calls.
  * Called at the STORE level so React components never see raw tool blocks.
  */
-function splitContentAndTools(rawText: string): {
+export function splitContentAndTools(rawText: string): {
   content: string
   toolCalls: Array<{ name: string; input: unknown }>
   isToolStreaming: boolean
@@ -160,7 +176,43 @@ export function setViewStoreAccessors(
 /**
  * Execute a tool call locally and return the result.
  */
-async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+export async function executeMediaTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+  // Handle create_task — add a task to the Kanban board
+  if (tool === "create_task") {
+    const title = (params.title as string) || "New Task"
+    const rawStatus = params.status as string
+    const validStatuses = ["queue", "in_progress", "review", "done"]
+    const status = (validStatuses.includes(rawStatus) ? rawStatus : "queue") as Task["status"]
+    const task: Task = {
+      id: uid(),
+      title,
+      status,
+      assigneeId: null,
+      tokens: 0,
+      duration: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    if (_storeSet) {
+      _storeSet((s) => ({ tasks: [...s.tasks, task] }))
+    }
+    // Auto-open kanban so user can see the new task
+    if (_openTab) _openTab("kanban", "Task Board", "layout-list")
+    return { ok: true, taskId: task.id, message: `Task "${title}" created on Kanban board` }
+  }
+
+  // Handle open_view — open a tab in the Studio UI
+  if (tool === "open_view") {
+    const view = (params.view as string) || (params.viewId as string) || "kanban"
+    const title = (params.title as string) || view
+    const icon = (params.icon as string) || "layout"
+    if (_openTab) {
+      _openTab(view, title, icon)
+      return { ok: true, message: `Opened "${title}" view` }
+    }
+    return { error: "Tab opener not available" }
+  }
+
   // Handle view.list — list all views from the client-side view store
   if (tool === "view.list") {
     if (!_viewStoreGet) return { error: "View store not available" }
@@ -587,13 +639,22 @@ function extractAgentId(sessionKey: string | undefined): string {
 }
 
 export const useGatewayStore = create<GatewayState>((set, get) => {
+  // Initialize module-level store accessor so executeMediaTool can mutate state
+  _storeSet = set
+
   /**
    * Handle events from the mock gateway (our custom protocol).
    */
   function handleMockEvent(event: GatewayEvent) {
     switch (event.type) {
       case "agents.snapshot":
-        set({ agents: event.agents })
+        // Preserve OpenCode agents — mock snapshot only replaces mock/openclaw agents
+        set((s) => ({
+          agents: [
+            ...s.agents.filter((a) => a.provider === "opencode"),
+            ...event.agents,
+          ],
+        }))
         break
 
       case "agent.updated": {
@@ -917,8 +978,16 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
               _streamBuffer.delete(messageId)
             }
 
+            // Resolve thinking placeholder ID (if any) for this agent — remove it atomically
+            const thinkingIdToRemove = _pendingThinkingByAgent.get(agentId)
+            if (thinkingIdToRemove) _pendingThinkingByAgent.delete(agentId)
+
             set((s) => {
-              const agentMsgs = s.messages[agentId] ?? []
+              let agentMsgs = s.messages[agentId] ?? []
+              // Atomically remove thinking placeholder
+              if (thinkingIdToRemove) {
+                agentMsgs = agentMsgs.filter((m) => m.id !== thinkingIdToRemove)
+              }
               const existing = agentMsgs.find((m) => m.id === messageId)
               const msgData = {
                 content,
@@ -1104,6 +1173,24 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         const rawText = payload.data.text as string
 
         if (agentId && messageId && rawText) {
+          // Remove thinking placeholder atomically before buffering first token
+          const thinkingId = _pendingThinkingByAgent.get(agentId)
+          if (thinkingId) {
+            _pendingThinkingByAgent.delete(agentId)
+            set((s) => {
+              const msgs = (s.messages[agentId] ?? []).filter((m) => m.id !== thinkingId)
+              return {
+                messages: {
+                  ...s.messages,
+                  [agentId]: [
+                    ...msgs,
+                    // seed an empty streaming placeholder so UI shows cursor immediately
+                    { id: messageId, agentId, role: "assistant" as const, content: "", isStreaming: true, timestamp: Date.now() },
+                  ],
+                },
+              }
+            })
+          }
           _streamBuffer.set(messageId, { agentId, messageId, rawText })
           scheduleStreamFlush(set)
           // Reset idle timer — if no new tokens for 3s, auto-finalize
@@ -1150,7 +1237,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         const sessionsRes = await wsClient.request("sessions.list", {})
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sessions = (sessionsRes as any)?.sessions ?? (sessionsRes as any)?.items ?? []
-        set({ sessions })
+        // Do NOT overwrite Studio chat sessions with gateway sessions — they are different things.
+        // Gateway sessions are used only for token aggregation below.
 
         // Aggregate token usage from sessions into agents
         // Session key format: "agent:{agentId}:{sender}"
@@ -1279,7 +1367,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
         events: [],
         tasks: [],
         messages: {},
-        sessions: [],
+        // sessions intentionally preserved across disconnect so chat history survives reconnects
         presence: {},
         models: [],
       })
@@ -1306,6 +1394,27 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             messageContent = `[System: ${MEDIA_TOOLS_PROMPT}]\n\n${msg.content}`
             mediaPromptSent.add(msg.agentId)
           }
+
+          // Add "Thinking..." placeholder so the user sees immediate feedback
+          const thinkingId = uid()
+          set((s) => ({
+            messages: {
+              ...s.messages,
+              [msg.agentId]: [
+                ...(s.messages[msg.agentId] ?? []),
+                {
+                  id: thinkingId,
+                  agentId: msg.agentId,
+                  sessionId: (msg as { sessionId?: string }).sessionId,
+                  role: "assistant" as const,
+                  content: "",
+                  isStreaming: true,
+                  timestamp: Date.now(),
+                },
+              ],
+            },
+          }))
+          _pendingThinkingByAgent.set(msg.agentId, thinkingId)
 
           wsClient.request("chat.send", {
             sessionKey: msg.agentId,
@@ -1407,6 +1516,21 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
     async fetchOpenCodeAgents(serverUrl: string) {
       try {
+        // Fetch global config first to get the default model fallback
+        let defaultModel = "unknown"
+        try {
+          const cfgRes = await fetch("/api/agent/opencode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
+            body: JSON.stringify({ action: "ping" }),
+          })
+          if (cfgRes.ok) {
+            const cfgData = await cfgRes.json()
+            const rawDefault = cfgData?.config?.model
+            if (typeof rawDefault === "string" && rawDefault) defaultModel = rawDefault
+          }
+        } catch { /* ignore — default stays "unknown" */ }
+
         const res = await fetch("/api/agent/opencode", {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-opencode-url": serverUrl },
@@ -1452,14 +1576,14 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const opencodeAgents: Agent[] = finalAgentList.map((a: any) => {
-          // Handle model that could be a string or an object
-          let modelStr = "unknown"
-          if (typeof a.model === "string") {
+          // Handle model that could be a string or an object; fall back to global default
+          let modelStr = defaultModel
+          if (typeof a.model === "string" && a.model) {
             modelStr = a.model
           } else if (a.model && typeof a.model === "object") {
             modelStr = a.model.primary ?? a.model.modelID ?? a.model.id ??
                        (a.model.providerID && a.model.modelID ? `${a.model.providerID}/${a.model.modelID}` : null) ??
-                       "unknown"
+                       defaultModel
           }
 
           return {
@@ -1549,12 +1673,19 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     },
 
     addMessage(agentId: string, message: Message) {
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [agentId]: [...(s.messages[agentId] ?? []), message],
-        },
-      }))
+      set((s) => {
+        const msgs = s.messages[agentId] ?? []
+        // Avoid duplicates - skip if message with same ID already exists
+        if (msgs.some((m) => m.id === message.id)) {
+          return s
+        }
+        return {
+          messages: {
+            ...s.messages,
+            [agentId]: [...msgs, message],
+          },
+        }
+      })
     },
 
     createSession(agentId: string, title?: string) {

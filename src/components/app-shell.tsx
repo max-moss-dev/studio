@@ -9,7 +9,7 @@ import { useGatewayStore, loadPersistedConfig, setViewStoreAccessors } from "@/s
 import { loadProviders } from "@/lib/providers"
 import { useGateway } from "@/hooks/use-gateway"
 import { Loader2, AlertTriangle, Radio, Code } from "lucide-react"
-import { SandpackView } from "@/components/sandpack-view"
+import { RuntimeView } from "@/components/runtime-view"
 import { ViewErrorBoundary } from "@/components/error-boundary"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 
@@ -128,9 +128,8 @@ function ActiveView() {
           </Button>
         </div>
         <div className="flex-1 overflow-hidden">
-          <SandpackView
+          <RuntimeView
             code={viewDef.code}
-            dependencies={viewDef.dependencies}
             viewProps={viewProps}
             onSend={send}
             onError={(err) => sendViewErrorToAgent(activeTab.viewId, err, send)}

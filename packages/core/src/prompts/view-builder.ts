@@ -1,119 +1,126 @@
 /**
  * View Builder prompt — instructions for agents on how to create and update
- * React views rendered in Sandpack iframe.
- *
- * This prompt is injected into the system message sent to agents.
- * It can be improved over time as we learn what works.
+ * native React plugin views with full access to Studio stores.
  */
 export const VIEW_BUILDER_PROMPT = `
-## Views — Building React UI Components
+## Views — Building Native Studio Plugins
 
-You can create and update interactive React views that render in the user's Studio UI.
-Views run in a sandboxed Sandpack iframe with React 18 + TypeScript.
+You can create and update interactive React views that render natively inside Studio —
+with full access to agents, sessions, tasks, and the entire application state.
 
 ### Tool
 
 \`\`\`tool
-{"tool": "view.update", "params": {"viewId": "my-dashboard", "code": "..."}}
+{"tool": "view.update", "params": {"viewId": "my-dashboard", "title": "My Dashboard", "code": "..."}}
 \`\`\`
 
-- **viewId**: kebab-case identifier. Use a descriptive name (e.g. "agent-dashboard", "task-timeline").
-- **code**: Full React component source (see structure below).
-- If the viewId doesn't exist, a new view is created. If it exists, the code is replaced.
-- Built-in views cannot be edited — you must use a new viewId.
+- **viewId**: kebab-case identifier (e.g. "projects", "agent-timeline", "task-stats")
+- **title**: human-readable tab title
+- **code**: Full React component source (TypeScript + JSX, see below)
+- Creating a new viewId registers and opens it immediately. Updating an existing one live-reloads it.
+- Built-in views (kanban, chats, etc.) cannot be overwritten — use a new viewId.
 
 ### Component Structure
 
 \`\`\`tsx
-import { useViewProps, send } from "./bridge"
+import { useState, useEffect } from "react"
+import { useGatewayStore, useTabStore } from "@studio/store"
 
 export default function MyView() {
-  const { agents, events, tasks, messages, models } = useViewProps()
+  // Full access to Studio state
+  const agents = useGatewayStore(s => s.agents)
+  const sessions = useGatewayStore(s => s.sessions)
+  const tasks = useGatewayStore(s => s.tasks)
+  const messages = useGatewayStore(s => s.messages)
+  const openTab = useTabStore(s => s.openTab)
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>My View</h1>
+    <div style={{ padding: 20, color: "#abb2bf" }}>
+      <h1 style={{ color: "#61afef" }}>My View</h1>
+      <p>{agents.length} agents connected</p>
     </div>
   )
 }
 \`\`\`
 
-### Available Data (useViewProps)
+### Available Imports
 
-| Field      | Type                          | Description                           |
-|------------|-------------------------------|---------------------------------------|
-| agents     | Agent[]                       | All connected agents with status      |
-| events     | AgentEvent[]                  | Recent agent events                   |
-| tasks      | Task[]                        | All tasks from the task board         |
-| messages   | Record<string, Message[]>     | Chat messages grouped by agent ID     |
-| models     | string[]                      | Available AI models                   |
+| Module | What you get |
+|--------|-------------|
+| \`react\` | useState, useEffect, useRef, useMemo, useCallback, etc. |
+| \`@studio/store\` | useGatewayStore, useTabStore |
+| \`lucide-react\` | All Lucide icons (Bot, Wrench, MessageSquare, etc.) |
+| \`./bridge\` | useViewProps(), send() — legacy compat |
 
-**Agent fields**: id, name, status ("online"|"busy"|"offline"|"error"), role, model, currentTask, tokensToday, tokensTotal
-**Task fields**: id, title, status ("queue"|"in_progress"|"done"|"blocked"), assigneeId, tokens, duration
-**Message fields**: id, agentId, role ("user"|"assistant"|"tool"), content, timestamp
-
-### Sending Actions (send)
+### Studio Store API
 
 \`\`\`tsx
-// Send a chat message to an agent
+import { useGatewayStore, useTabStore } from "@studio/store"
+
+// Read state
+const agents = useGatewayStore(s => s.agents)          // Agent[]
+const sessions = useGatewayStore(s => s.sessions)      // ChatSession[]
+const tasks = useGatewayStore(s => s.tasks)            // Task[]
+const messages = useGatewayStore(s => s.messages)      // Record<agentId, Message[]>
+const connected = useGatewayStore(s => s.connected)    // boolean
+
+// Actions
+const addMessage = useGatewayStore(s => s.addMessage)
+const createSession = useGatewayStore(s => s.createSession)
+const send = useGatewayStore(s => s.send)
+
+// Tab management
+const openTab = useTabStore(s => s.openTab)
+// openTab("chats", "Chat with agent", "message-square", { agentId: "xyz" })
+// openTab("kanban", "Task Board", "layout-list")
+\`\`\`
+
+### Key Types
+
+**Agent**: id, name, status ("online"|"busy"|"offline"|"error"), role, model, currentTask, tokensToday, tokensTotal, provider
+
+**ChatSession**: id, agentId, title, createdAt, updatedAt
+
+**Task**: id, title, status ("queue"|"in_progress"|"review"|"done"), assigneeId, tokens, duration, createdAt, updatedAt
+
+**Message**: id, agentId, sessionId, role ("user"|"assistant"|"tool"), content, timestamp, toolCalls?, isStreaming?
+
+### Styling
+
+Views render in the Studio dark theme. Use inline styles:
+
+\`\`\`tsx
+const S = {
+  page:    { padding: 20, color: "#abb2bf", fontFamily: "system-ui, sans-serif", height: "100%", overflow: "auto" },
+  heading: { color: "#61afef", fontSize: 18, fontWeight: 600, marginBottom: 16 },
+  card:    { background: "#2c313a", borderRadius: 8, padding: 16, marginBottom: 8, border: "1px solid #3e4451" },
+  badge:   (color: string) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 500, background: color + "22", color }),
+  btn:     { background: "#61afef22", color: "#61afef", border: "1px solid #61afef44", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13 },
+}
+
+// Status colors
+const STATUS = { online: "#98c379", busy: "#e5c07b", error: "#e06c75", offline: "#5c6370" }
+// Role colors
+const ROLE = { orchestrator: "#61afef", coder: "#98c379", reviewer: "#c678dd", researcher: "#e5c07b" }
+\`\`\`
+
+### Sending Actions
+
+\`\`\`tsx
+const send = useGatewayStore(s => s.send)
+
+// Chat with an agent
 send({ type: "agent.message", agentId: "main", content: "Hello" })
 
 // Create a task
 send({ type: "task.create", title: "Fix bug", assigneeId: "coder-1" })
-
-// Update task status
-send({ type: "task.update", taskId: "t1", updates: { status: "done" } })
 \`\`\`
-
-### Styling
-
-Use inline styles or CSS-in-JS. The iframe has a dark theme:
-- Background: #282c34
-- Text: #abb2bf
-- Accent: #61afef
-- Success: #98c379
-- Warning: #e5c07b
-- Error: #e06c75
-- Muted: #5c6370
-
-Standard patterns:
-\`\`\`tsx
-// Use CSS custom properties for consistent theming
-const styles = {
-  container: { padding: 20, color: "#abb2bf", fontFamily: "system-ui, sans-serif" },
-  card: { background: "#2c313a", borderRadius: 8, padding: 16, marginBottom: 8 },
-  heading: { color: "#61afef", fontSize: 18, fontWeight: 600, marginBottom: 12 },
-  badge: (color: string) => ({
-    display: "inline-block", padding: "2px 8px", borderRadius: 10,
-    fontSize: 11, fontWeight: 500, background: color + "20", color,
-  }),
-}
-\`\`\`
-
-### npm Packages
-
-You can import any npm package. Popular choices:
-- **recharts** — charts and graphs
-- **d3** — data visualization
-- **date-fns** — date formatting
-- **lodash** — utilities
-
-Import them normally: \`import { BarChart, Bar } from "recharts"\`
-Sandpack resolves them automatically.
-
-### Error Handling
-
-If your view throws a runtime error, the error message will be automatically sent back
-to you so you can fix it. Always handle edge cases:
-- Check if data arrays are empty before rendering
-- Use optional chaining for nested properties
-- Provide loading/empty states
 
 ### Best Practices
 
-1. **Start simple** — get a working view first, then iterate
-2. **Use real data** — always use useViewProps() data, never hardcode
-3. **Handle empty states** — show helpful messages when no data
-4. **Keep it focused** — one view = one purpose
-5. **Responsive layout** — use flexbox, avoid fixed widths
+1. **Always check empty state** — arrays may be empty on first render
+2. **Use optional chaining** — \`agent?.status ?? "offline"\`
+3. **One view = one purpose** — keep it focused
+4. **Use real data** — never hardcode sample data, always use store
+5. **Height 100%** — views fill the tab; set \`height: "100%"\` on root element
 `.trim()

@@ -158,7 +158,7 @@ export type GatewayMessage =
   | { type: "subscribe"; channels: string[] }
   | { type: "ping" }
   | { type: "agent.command"; agentId: string; command: string }
-  | { type: "agent.message"; agentId: string; content: string }
+  | { type: "agent.message"; agentId: string; content: string; sessionId?: string }
   | { type: "agent.create"; config: Partial<Agent> & { opencodeConfig?: OpenCodeAgentConfig }; provider?: ProviderSource }
   | { type: "agent.update"; agentId: string; config: Partial<Agent> }
   | { type: "agent.delete"; agentId: string }
