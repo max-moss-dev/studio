@@ -12,8 +12,12 @@ import type {
   OpenCodeModelInfo,
   ProviderSource,
   ChatSession,
+  OllamaConfig,
+  OllamaMessage,
+  OllamaTool,
 } from "./types"
 import { WsClient } from "./ws-client"
+import { OllamaClient } from "./ollama-client"
 import { uid } from "./mock-data"
 import { VIEW_BUILDER_PROMPT } from "./prompts/view-builder"
 import { ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_PROMPT } from "./prompts/orchestrator"
@@ -728,26 +732,26 @@ function executeToolCallsFromStream(
     _executedToolCalls.add(dedupeKey)
 
     const tc = toolCalls[i]
-    ;(async () => {
-      const result = await executeMediaTool(tc.tool, tc.params)
-      const resultMessage = `Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+      ; (async () => {
+        const result = await executeMediaTool(tc.tool, tc.params)
+        const resultMessage = `Tool ${tc.tool} result:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
 
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [agentId]: [
-            ...(s.messages[agentId] ?? []),
-            {
-              id: uid(),
-              agentId,
-              role: "tool" as const,
-              content: resultMessage,
-              timestamp: Date.now(),
-            },
-          ],
-        },
-      }))
-    })()
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [agentId]: [
+              ...(s.messages[agentId] ?? []),
+              {
+                id: uid(),
+                agentId,
+                role: "tool" as const,
+                content: resultMessage,
+                timestamp: Date.now(),
+              },
+            ],
+          },
+        }))
+      })()
   }
 }
 
@@ -892,8 +896,8 @@ function agentEntryToAgent(entry: any): Agent {
     modelStr = rawModel
   } else if (rawModel && typeof rawModel === "object") {
     modelStr = rawModel.primary ?? rawModel.modelID ?? rawModel.id ??
-               (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
-               "unknown"
+      (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
+      "unknown"
   }
 
   return {
@@ -924,8 +928,8 @@ function sessionToAgent(session: any): Agent {
   } else if (rawModel && typeof rawModel === "object") {
     // Handle {providerID, modelID} or {primary, id, ...} structures
     modelStr = rawModel.primary ?? rawModel.modelID ?? rawModel.id ??
-               (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
-               "unknown"
+      (rawModel.providerID && rawModel.modelID ? `${rawModel.providerID}/${rawModel.modelID}` : null) ??
+      "unknown"
   }
 
   return {
@@ -1292,7 +1296,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           if (toolCalls.length > 0 && agentId) {
             // Execute tool calls locally and send results back
             // Skip already-executed ones (may have been run from agent events)
-            ;(async () => {
+            ; (async () => {
               const results: string[] = []
               for (let i = 0; i < toolCalls.length; i++) {
                 const tc = toolCalls[i]
@@ -1699,7 +1703,6 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
     url: "",
     apiKey: "",
     connected: false,
-    mockMode: false,
     connectionError: null,
     agents: [],
     events: [],
@@ -1952,8 +1955,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             modelStr = a.model
           } else if (a.model && typeof a.model === "object") {
             modelStr = a.model.primary ?? a.model.modelID ?? a.model.id ??
-                       (a.model.providerID && a.model.modelID ? `${a.model.providerID}/${a.model.modelID}` : null) ??
-                       defaultModel
+              (a.model.providerID && a.model.modelID ? `${a.model.providerID}/${a.model.modelID}` : null) ??
+              defaultModel
           }
 
           return {

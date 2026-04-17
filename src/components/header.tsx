@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { X, Plus, Zap, Terminal } from "lucide-react"
+import { useState } from "react"
+import { X, Plus } from "lucide-react"
 import {
   Bot,
   Kanban,
@@ -20,7 +20,6 @@ import { Badge } from "@/components/ui/badge"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
 import { cn } from "@/lib/utils"
-import { loadProviders, type ProviderId } from "@/lib/providers"
 
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -37,77 +36,23 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   code: Code,
 }
 
-const PROVIDER_META: Record<ProviderId, { icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = {
-  openclaw: { icon: Zap, color: "#61afef", label: "OpenClaw" },
-  opencode: { icon: Terminal, color: "#e5c07b", label: "OpenCode" },
-}
-
 function ProviderBadges({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const connected = useGatewayStore((s) => s.connected)
-  const mockMode = useGatewayStore((s) => s.mockMode)
-  // Defer localStorage read to client to avoid SSR hydration mismatch
-  const [enabled, setEnabled] = useState<ProviderId[]>([])
-  const [providers, setProviders] = useState(() => loadProviders())
-  useEffect(() => {
-    const p = loadProviders()
-    setProviders(p)
-    setEnabled((Object.keys(p) as ProviderId[]).filter((id) => p[id].enabled))
-  }, [connected])
+  const ollamaConnected = useGatewayStore((s) => s.ollamaConnected)
+  const ollamaConfig = useGatewayStore((s) => s.ollamaConfig)
 
-  // If no providers enabled, show generic status
-  if (enabled.length === 0) {
-    return (
-      <Badge
-        variant={connected ? "default" : "secondary"}
-        className="gap-1.5 text-xs cursor-pointer hover:opacity-80"
-        onClick={onOpenSettings}
-      >
-        {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-        {connected ? (mockMode ? "Mock Mode" : "Connected") : "Disconnected"}
-      </Badge>
-    )
-  }
-
-  // Show a badge per enabled provider
   return (
-    <div className="flex items-center gap-1">
-      {enabled.map((id) => {
-        const meta = PROVIDER_META[id]
-        const Icon = meta.icon
-        const isActive = id === "openclaw" ? (connected && !mockMode) : !!providers[id].apiKey?.trim()
-        return (
-          <button
-            key={id}
-            onClick={onOpenSettings}
-            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium cursor-pointer hover:opacity-80 transition-opacity"
-            style={{
-              backgroundColor: `${meta.color}20`,
-              color: meta.color,
-            }}
-            title={`${meta.label} — ${isActive ? "connected" : "configured"}`}
-          >
-            <Icon className="h-3 w-3" style={{ color: meta.color }} />
-            {meta.label}
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: isActive ? meta.color : "#5c6370" }}
-            />
-          </button>
-        )
-      })}
-      {connected && mockMode && (
-        <Badge variant="secondary" className="gap-1 text-[10px] cursor-pointer" onClick={onOpenSettings}>
-          Mock
-        </Badge>
-      )}
-    </div>
+    <Badge
+      variant={ollamaConnected ? "default" : "secondary"}
+      className="gap-1.5 text-xs cursor-pointer hover:opacity-80"
+      onClick={onOpenSettings}
+    >
+      {ollamaConnected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+      {ollamaConnected ? `Ollama: ${ollamaConfig?.defaultModel || "Connected"}` : "Disconnected"}
+    </Badge>
   )
 }
 
 export function Header() {
-  const connected = useGatewayStore((s) => s.connected)
-  const mockMode = useGatewayStore((s) => s.mockMode)
-  const disconnect = useGatewayStore((s) => s.disconnect)
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const setActiveTab = useTabStore((s) => s.setActiveTab)

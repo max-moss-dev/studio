@@ -252,7 +252,6 @@ function ConnectionErrorBanner() {
 
 function Footer() {
   const connected = useGatewayStore((s) => s.connected)
-  const mockMode = useGatewayStore((s) => s.mockMode)
   const url = useGatewayStore((s) => s.url)
   const error = useGatewayStore((s) => s.connectionError)
 
@@ -271,8 +270,6 @@ function Footer() {
   } else if (connected) {
     if (enabledIds.length > 0) {
       statusText = enabledIds.join(" + ")
-    } else if (mockMode) {
-      statusText = "mock://localhost"
     } else {
       statusText = url || "connected"
     }

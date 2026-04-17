@@ -47,7 +47,7 @@ export default function SettingsView() {
   function handleDisconnect(id: ProviderId) {
     if (id === "openclaw" && connected) {
       disconnect()
-      try { localStorage.removeItem("openclaw-gateway-config") } catch {}
+      try { localStorage.removeItem("openclaw-gateway-config") } catch { }
     }
     updateProvider(id, { enabled: false })
   }
@@ -171,13 +171,6 @@ export default function SettingsView() {
           <span className="px-3 text-xs text-muted-foreground">or</span>
           <div className="flex-1 border-t" />
         </div>
-        <Button variant="outline" onClick={() => connectMock()} disabled={connected && mockMode} className="gap-2">
-          <FlaskConical className="h-4 w-4" />
-          {connected && mockMode ? <><Check className="h-3.5 w-3.5" /> Mock Mode Active</> : "Use Mock Data"}
-        </Button>
-        <p className="text-xs text-muted-foreground text-center">
-          Try the app with simulated agents — no setup needed.
-        </p>
       </div>
     </div>
   )
