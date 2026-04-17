@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import Link from "next/link"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useGatewayStore } from "@/stores/gateway-store"
@@ -14,6 +15,8 @@ import {
   Loader2,
   Terminal,
   Wifi,
+  Key,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -181,6 +184,30 @@ export default function SettingsView() {
         <p className="text-xs text-muted-foreground text-center">
           Try the app with simulated agents — no setup needed.
         </p>
+
+        {/* MCP Server / API Keys Link */}
+        <div className="relative flex items-center py-1">
+          <div className="flex-1 border-t" />
+          <span className="px-3 text-xs text-muted-foreground">MCP Server</span>
+          <div className="flex-1 border-t" />
+        </div>
+        <Link
+          href="/settings/api-keys"
+          className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-[#61afef]/10 border-[#61afef]/30">
+              <Key className="h-4.5 w-4.5" style={{ color: "#61afef" }} />
+            </div>
+            <div>
+              <div className="text-sm font-medium">API Keys</div>
+              <div className="text-xs text-muted-foreground">
+                Manage keys for MCP server access
+              </div>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
       </div>
     </div>
   )
