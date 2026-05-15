@@ -27,6 +27,7 @@ import {
   Code,
   Upload,
   ClipboardPaste,
+  Server,
 } from "lucide-react"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { uid } from "@/lib/mock-data"
@@ -45,6 +46,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   "file-text": FileText,
   "check-circle": CheckCircle,
   code: Code,
+  server: Server,
 }
 
 // Views that shouldn't appear in the picker

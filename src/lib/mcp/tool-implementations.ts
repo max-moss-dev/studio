@@ -9,6 +9,98 @@ import { z } from "zod"
 import { registerTool, ToolResult } from "./tools"
 import { useGatewayStore } from "@/stores/gateway-store"
 import { useTabStore } from "@/stores/tab-store"
+import {
+  createAppWorkspace,
+  getAppWorkspace,
+  listAppFiles,
+  listAppWorkspaces,
+  readAppFile,
+  writeAppFile,
+} from "@/lib/app-workspaces"
+
+
+// ============================================
+// App Workspace Tools
+// ============================================
+
+registerTool({
+  name: "studio.apps.list",
+  description: "List app workspaces that expose their own app-scoped MCP tools",
+  scopes: ["read"],
+  inputSchema: z.object({}),
+  handler: async () => ({
+    success: true,
+    data: { apps: await listAppWorkspaces() },
+  }) as ToolResult,
+})
+
+registerTool({
+  name: "studio.apps.create",
+  description: "Create a new app workspace with an app-scoped MCP endpoint and writable files",
+  scopes: ["write"],
+  inputSchema: z.object({
+    id: z.string().optional(),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    initialFiles: z.record(z.string()).optional(),
+  }),
+  handler: async (params) => {
+    const { id, name, description, initialFiles } = params as {
+      id?: string
+      name: string
+      description?: string
+      initialFiles?: Record<string, string>
+    }
+    return {
+      success: true,
+      data: { app: await createAppWorkspace({ id, name, description, initialFiles }) },
+    } as ToolResult
+  },
+})
+
+registerTool({
+  name: "studio.apps.info",
+  description: "Get manifest, MCP endpoint, and file list for one app workspace",
+  scopes: ["read"],
+  inputSchema: z.object({ appId: z.string() }),
+  handler: async (params) => ({
+    success: true,
+    data: { app: await getAppWorkspace((params as { appId: string }).appId) },
+  }) as ToolResult,
+})
+
+registerTool({
+  name: "studio.apps.files.list",
+  description: "List files in an app workspace",
+  scopes: ["read"],
+  inputSchema: z.object({ appId: z.string() }),
+  handler: async (params) => ({
+    success: true,
+    data: { files: await listAppFiles((params as { appId: string }).appId) },
+  }) as ToolResult,
+})
+
+registerTool({
+  name: "studio.apps.files.read",
+  description: "Read a UTF-8 text file from an app workspace",
+  scopes: ["read"],
+  inputSchema: z.object({ appId: z.string(), path: z.string() }),
+  handler: async (params) => {
+    const { appId, path } = params as { appId: string; path: string }
+    return { success: true, data: await readAppFile(appId, path) } as ToolResult
+  },
+})
+
+registerTool({
+  name: "studio.apps.files.write",
+  description: "Write a UTF-8 text file to an app workspace",
+  scopes: ["write"],
+  inputSchema: z.object({ appId: z.string(), path: z.string(), content: z.string() }),
+  handler: async (params) => {
+    const { appId, path, content } = params as { appId: string; path: string; content: string }
+    return { success: true, data: await writeAppFile(appId, path, content) } as ToolResult
+  },
+})
 
 // ============================================
 // Task/Kanban Tools
@@ -380,6 +472,12 @@ registerTool({
           "plugins.list",
           "plugins.build",
           "plugins.write",
+          "apps.list",
+          "apps.create",
+          "apps.info",
+          "apps.files.list",
+          "apps.files.read",
+          "apps.files.write",
         ],
       },
     } as ToolResult

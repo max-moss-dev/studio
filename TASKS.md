@@ -21,6 +21,8 @@ Track ongoing and planned work across the Studio project.
 
 ## Completed (this session)
 
+- [x] MCP App Factory — app workspaces with global Studio MCP tools and per-app MCP endpoints for AI read/write access
+
 - [x] OpenCode chat responses are clean text (fixed raw JSON display — extractText() reads parts array)
 - [x] Per-agent OpenCode sessions — Map<agentId, sessionId> replaces single shared ref
 - [x] Studio tools system prompt injected on first message to OpenCode agents
@@ -97,6 +99,8 @@ Track ongoing and planned work across the Studio project.
   - [x] view-builder.ts prompt updated with full plugin system docs
 
 ## Key Architecture Decisions
+
+- **MCP App Factory**: Studio now treats generated apps as isolated workspaces under `apps/{appId}` with an `app.json` manifest and `files/` tree. Global `/api/mcp` tools (`studio.apps.*`) can create/list/read/write across apps, while each app exposes an app-scoped JSON-RPC MCP endpoint at `/api/apps/{appId}/mcp` with `app.info` and `app.files.*` tools so external AI agents can operate on one app as its own tool server.
 
 - **Global Orchestrator**: Persistent right-side sidebar (`OrchestratorSidebar`) always visible across all views. Hosts a reserved "Studio" agent (id: `studio-orchestrator`) that's auto-created on connect and survives disconnects. The orchestrator gets a special `ORCHESTRATOR_PROMPT` (vs `MEDIA_TOOLS_PROMPT` for other agents) emphasizing delegation. Three new tools: `agent.status` (see all agents), `agent.delegate` (send work to another agent + creates session + adds message to ChatsView), `chat.open` (focus Chats view on an agent). Toggle: `OrchestratorToggleButton` in header or `Cmd+Shift+O`.
 

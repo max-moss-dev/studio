@@ -10,6 +10,7 @@
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAllTools, executeTool } from "@/lib/mcp/tools"
+import "@/lib/mcp/tool-implementations"
 import { loadAPIKeys } from "@/lib/mcp/api-keys"
 
 // MCP Protocol Version
