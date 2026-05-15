@@ -49,6 +49,12 @@ const BUILT_IN_VIEWS: ViewDefinition[] = [
     type: "built-in",
   },
   {
+    id: "app-factory",
+    title: "MCP Apps",
+    icon: "server",
+    type: "built-in",
+  },
+  {
     id: "settings",
     title: "Settings",
     icon: "settings",

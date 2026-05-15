@@ -30,6 +30,7 @@ const ViewPickerView = lazy(() => import("@/views/view-picker"))
 const MediaView = lazy(() => import("@/views/media"))
 const TodoView = lazy(() => import("@/views/todo"))
 const CodeEditorView = lazy(() => import("@/views/code-editor"))
+const AppFactoryView = lazy(() => import("@/views/app-factory"))
 
 function ViewFallback() {
   return (
@@ -127,6 +128,8 @@ function ActiveView() {
       return <Suspense fallback={<ViewFallback />}><TodoView /></Suspense>
     case "code-editor":
       return <Suspense fallback={<ViewFallback />}><CodeEditorView viewId={tabState.viewId as string} /></Suspense>
+    case "app-factory":
+      return <Suspense fallback={<ViewFallback />}><AppFactoryView /></Suspense>
   }
 
   // Compiled plugin (esbuild bundle) — BundledView loads via fetch + dynamic import
